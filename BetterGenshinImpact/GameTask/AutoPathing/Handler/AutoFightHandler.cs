@@ -1,4 +1,4 @@
-﻿using BetterGenshinImpact.Core.Config;
+using BetterGenshinImpact.Core.Config;
 using BetterGenshinImpact.GameTask.AutoFight;
 using BetterGenshinImpact.GameTask.Common;
 using System;
@@ -84,8 +84,12 @@ internal class AutoFightHandler : IActionHandler
         {
             path = Global.Absolute(@"User\AutoFight\");
         }
+        else if ("万能自动战斗".Equals(config.StrategyName))
+        {
+            path = "UniversalAutoFight"; // 特殊标识，不需要检查文件存在性
+        }
 
-        if (!File.Exists(path) && !Directory.Exists(path))
+        if (!File.Exists(path) && !Directory.Exists(path) && !"UniversalAutoFight".Equals(path))
         {
             throw new Exception("战斗策略文件不存在");
         }

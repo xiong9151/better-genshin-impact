@@ -365,8 +365,12 @@ public partial class TaskSettingsPageViewModel : ViewModel
         {
             path = Global.Absolute(@"User\AutoFight\");
         }
+        else if ("万能自动战斗".Equals(strategyName))
+        {
+            path = "UniversalAutoFight"; // 特殊标识，不需要检查文件存在性
+        }
 
-        if (!File.Exists(path) && !Directory.Exists(path))
+        if (!File.Exists(path) && !Directory.Exists(path) && !"UniversalAutoFight".Equals(path))
         {
             UIDispatcherHelper.Invoke(() => { Toast.Error("当前选择的自动战斗策略文件不存在"); });
             return true;

@@ -1,3 +1,4 @@
+
 using BetterGenshinImpact.Core.Recognition.ONNX;
 using BetterGenshinImpact.Core.Simulator;
 using BetterGenshinImpact.Core.Simulator.Extensions;
@@ -25,6 +26,7 @@ using BetterGenshinImpact.GameTask.AutoPick.Assets;
 using BetterGenshinImpact.Core.Recognition;
 using BetterGenshinImpact.GameTask.Common.Element.Assets;
 using BetterGenshinImpact.GameTask.Common;
+using BetterGenshinImpact.GameTask.AutoFight.Universal;
 
 namespace BetterGenshinImpact.GameTask.AutoFight;
 
@@ -54,6 +56,9 @@ public class AutoFightTask : ISoloTask
 
     // 战斗点位
     public static WaypointForTrack? FightWaypoint  {get; set;} = null;
+    
+    // 标识是否为UniversalAutoFight模式
+    private readonly bool _isUniversalAutoFightMode;
     
     private class TaskFightFinishDetectConfig
     {
@@ -198,7 +203,15 @@ public class AutoFightTask : ISoloTask
     public AutoFightTask(AutoFightParam taskParam)
     {
         _taskParam = taskParam;
-        _combatScriptBag = CombatScriptParser.ReadAndParse(_taskParam.CombatStrategyPath);
+        
+        // 检查是否为UniversalAutoFight模式
+        _isUniversalAutoFightMode = "UniversalAutoFight".Equals(_taskParam.CombatStrategyPath);
+        
+        if (!_isUniversalAutoFightMode)
+        {
+            // 只有非UniversalAutoFight模式才加载战斗脚本
+            _combatScriptBag = CombatScriptParser.ReadAndParse(_taskParam.CombatStrategyPath);
+        }
 
         if (_taskParam.FightFinishDetectEnabled)
         {
@@ -239,14 +252,21 @@ public class AutoFightTask : ISoloTask
 
         LogScreenResolution();
         var combatScenes = GetCombatScenesWithRetry();
-        /*var combatScenes = new CombatScenes().InitializeTeam(CaptureToRectArea());
-        if (!combatScenes.CheckTeamInitialized())
+
+        // 如果是UniversalAutoFight模式，使用专门的处理逻辑
+        if (_isUniversalAutoFightMode)
         {
-            throw new Exception("识别队伍角色失败");
-        }*/
+            await StartUniversalAutoFight(combatScenes, ct);
+            return;
+        }
 
-
-        // var actionSchedulerByCd = ParseStringToDictionary(_taskParam.ActionSchedulerByCd);
+        // 原有逻辑：处理普通战斗脚本
+        // 确保_combatScriptBag不为null
+        if (_combatScriptBag == null)
+        {
+            throw new Exception("战斗脚本未加载");
+        }
+        
         var combatCommands = _combatScriptBag.FindCombatScript(combatScenes.GetAvatars());
         // 命令用到的角色名 筛选交集
         var commandAvatarNames = combatCommands.Select(c => c.Name).Distinct()
@@ -695,7 +715,80 @@ public class AutoFightTask : ISoloTask
             await new ScanPickTask().Start(ct);
         }
     }
+    
+    /// <summary>
+    /// 启动UniversalAutoFight模式
+    /// </summary>
+    private async Task StartUniversalAutoFight(CombatScenes combatScenes, CancellationToken ct)
+    {
+        Logger.LogInformation("开始万能自动战斗模式");
+        
+        var universalAutoFightTask = new UniversalAutoFightTask(combatScenes);
+        
+        // 新的取消token
+        var cts2 = new CancellationTokenSource();
+        ct.Register(cts2.Cancel);
 
+        combatScenes.BeforeTask(cts2.Token);
+        TimeSpan fightTimeout = TimeSpan.FromSeconds(_taskParam.Timeout); // 战斗超时时间
+        Stopwatch timeoutStopwatch = Stopwatch.StartNew();
+
+        Stopwatch checkFightFinishStopwatch = Stopwatch.StartNew();
+        TimeSpan checkFightFinishTime = TimeSpan.FromSeconds(_finishDetectConfig.CheckTime); //检查战斗超时时间的超时时间
+
+        var fightEndFlag = false;
+        var timeOutFlag = false;
+
+        // 战斗操作
+        var fightTask = Task.Run(async () =>
+        {
+            try
+            {
+                FightStatusFlag = true;
+                
+                while (!cts2.Token.IsCancellationRequested)
+                {
+                    // 执行UniversalAutoFight核心战斗逻辑
+                    universalAutoFightTask.ProcessAutoFight();
+                    
+                    // 短暂延迟，避免CPU占用过高
+                    var delayTask = Task.Delay(100, cts2.Token);
+                    await delayTask;
+                    
+                    
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 正常取消
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "万能自动战斗执行出错");
+                throw;
+            }
+            finally
+            {
+                FightStatusFlag = false;
+            }
+        }, cts2.Token);
+
+        // 等待战斗结束或超时
+        await fightTask;
+
+        // 处理战斗结束后的逻辑
+        if (fightEndFlag || timeOutFlag)
+        {
+        if (_taskParam.PickDropsAfterFightEnabled)
+        {
+            // 执行自动拾取掉落物的功能
+            await new ScanPickTask().Start(cts2.Token);
+            }
+        }
+
+        cts2.Cancel();
+    }
+    
     private void LogScreenResolution()
     {
         AssertUtils.CheckGameResolution("自动战斗");

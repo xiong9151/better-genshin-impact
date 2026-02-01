@@ -1,4 +1,4 @@
-﻿using BetterGenshinImpact.Core.Config;
+using BetterGenshinImpact.Core.Config;
 using BetterGenshinImpact.Core.Script;
 using BetterGenshinImpact.GameTask;
 using BetterGenshinImpact.GameTask.Common.Element.Assets;
@@ -21,14 +21,14 @@ public partial class AutoFightViewModel : ObservableObject, IViewModel
     {
         Config = TaskContext.Instance().Config;
         _strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
-        _combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+        _combatStrategyList = ["根据队伍自动选择", "万能自动战斗", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
     }
 
     public AutoFightViewModel(AllConfig config)
     {
         Config = config;
         _strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
-        _combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+        _combatStrategyList = ["根据队伍自动选择", "万能自动战斗", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
     }
 
     [ObservableProperty]
@@ -66,7 +66,7 @@ public partial class AutoFightViewModel : ObservableObject, IViewModel
         switch (type)
         {
             case "Combat":
-                CombatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+                CombatStrategyList = ["根据队伍自动选择", "万能自动战斗", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
                 break;
 
             case "GeniusInvocation":

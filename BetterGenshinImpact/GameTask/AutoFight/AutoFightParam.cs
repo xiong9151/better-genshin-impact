@@ -7,7 +7,6 @@ namespace BetterGenshinImpact.GameTask.AutoFight;
 
 
 
-
 public class AutoFightParam : BaseTaskParam<AutoFightTask>
 {
     public class FightFinishDetectConfig
@@ -104,6 +103,10 @@ public class AutoFightParam : BaseTaskParam<AutoFightTask>
         if ("根据队伍自动选择".Equals(strategyName))
         {
             CombatStrategyPath =  Global.Absolute(@"User\AutoFight\");
+        }
+        else if ("万能自动战斗".Equals(strategyName))
+        {
+            CombatStrategyPath = "UniversalAutoFight"; // 特殊标识
         }
         else
         {
