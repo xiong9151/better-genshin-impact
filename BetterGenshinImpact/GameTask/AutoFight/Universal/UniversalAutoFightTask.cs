@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -17,11 +18,17 @@ public class UniversalAutoFightTask
     private readonly CombatScenes _combatScenes;
     private readonly UniversalAutoFightParser _parser;
     
+    // 角色优先级配置
+    private readonly Dictionary<string, List<string>> _rolePriorityConfig;
+    
     // 记录每个出招表的最后执行时间（角色名 + 出招表最大持续时间作为唯一标识）
     private Dictionary<string, double> _combatTableLastExecutionTime = new Dictionary<string, double>();
     
     // 技能CD信息字典（角色名 -> 技能CD列表）
     private Dictionary<string, List<SkillCooldownInfo>> _skillCooldowns = new Dictionary<string, List<SkillCooldownInfo>>();
+    
+    // 标记是否已经输出过队伍信息
+    private bool _hasOutputTeamInfo = false;
     
     // 技能CD信息（基于预测时间）
     private class SkillCooldownInfo
@@ -41,6 +48,93 @@ public class UniversalAutoFightTask
         _combatScenes = combatScenes;
         _skillCooldowns = new Dictionary<string, List<SkillCooldownInfo>>();
         _parser = new UniversalAutoFightParser();
+        
+        // 读取角色优先级配置
+        _rolePriorityConfig = _parser.ReadRolePriorityConfig() ?? new Dictionary<string, List<string>>();
+        
+        // 添加调试日志
+        if (_rolePriorityConfig != null && _rolePriorityConfig.Count > 0)
+        {
+            Logger.LogInformation($"成功加载角色优先级配置，包含 {string.Join(", ", _rolePriorityConfig.Keys)}");
+            if (_rolePriorityConfig.TryGetValue("护盾排列", out var shieldList))
+            {
+                Logger.LogInformation($"护盾排列包含 {shieldList.Count} 个角色: [{string.Join(", ", shieldList.Take(5))}{(shieldList.Count > 5 ? "..." : "")}]");
+            }
+            if (_rolePriorityConfig.TryGetValue("治疗排列", out var healList))
+            {
+                Logger.LogInformation($"治疗排列包含 {healList.Count} 个角色: [{string.Join(", ", healList.Take(5))}{(healList.Count > 5 ? "..." : "")}]");
+            }
+            if (_rolePriorityConfig.TryGetValue("前台排列", out var frontlineList))
+            {
+                Logger.LogInformation($"前台排列包含 {frontlineList.Count} 个角色: [{string.Join(", ", frontlineList.Take(5))}{(frontlineList.Count > 5 ? "..." : "")}]");
+            }
+        }
+        else
+        {
+            Logger.LogWarning("角色优先级配置为空或未加载");
+        }
+    }
+    
+    /// <summary>
+    /// 获取角色在指定排列中的优先级索引（0表示最高优先级）
+    /// </summary>
+    /// <param name="roleList">角色列表</param>
+    /// <param name="avatarName">角色名称</param>
+    /// <returns>优先级索引，如果不在列表中返回-1</returns>
+    private int GetRolePriorityIndex(List<string> roleList, string avatarName)
+    {
+        if (roleList == null || string.IsNullOrEmpty(avatarName))
+            return -1;
+            
+        for (int i = 0; i < roleList.Count; i++)
+        {
+            if (roleList[i] == avatarName)
+                return i;
+        }
+        return -1;
+    }
+    
+    /// <summary>
+    /// 判断角色是否为护盾角色
+    /// </summary>
+    /// <param name="avatarName">角色名称</param>
+    /// <returns>是否为护盾角色</returns>
+    private bool IsShieldRole(string avatarName)
+    {
+        if (_rolePriorityConfig.TryGetValue("护盾排列", out var shieldList))
+        {
+            return shieldList.Contains(avatarName);
+        }
+        return false;
+    }
+    
+    /// <summary>
+    /// 判断角色是否为治疗角色
+    /// </summary>
+    /// <param name="avatarName">角色名称</param>
+    /// <returns>是否为治疗角色</returns>
+    private bool IsHealRole(string avatarName)
+    {
+        if (_rolePriorityConfig.TryGetValue("治疗排列", out var healList))
+        {
+            return healList.Contains(avatarName);
+        }
+        return false;
+    }
+    
+    /// <summary>
+    /// 获取角色在前台排列中的优先级索引
+    /// </summary>
+    /// <param name="avatarName">角色名称</param>
+    /// <returns>前台优先级索引，如果不在列表中返回一个较大的值</returns>
+    private int GetFrontlinePriorityIndex(string avatarName)
+    {
+        if (_rolePriorityConfig.TryGetValue("前台排列", out var frontlineList))
+        {
+            var index = GetRolePriorityIndex(frontlineList, avatarName);
+            return index >= 0 ? index : int.MaxValue;
+        }
+        return int.MaxValue;
     }
     
     /// <summary>
@@ -86,8 +180,69 @@ public class UniversalAutoFightTask
                 return;
             }
             
-            // 计算所有出招表的真实优先级
-            var priorityList = new List<(string AvatarName, UniversalAutoFightParser.CombatTableConfig Config, int Priority)>();
+            // 找出当前队伍中在护盾排列中最靠前的角色
+            string highestPriorityShieldRole = null;
+            int minShieldIndex = int.MaxValue;
+            if (_rolePriorityConfig.TryGetValue("护盾排列", out var shieldList))
+            {
+                Logger.LogDebug($"护盾排列列表长度: {shieldList.Count}");
+                foreach (var avatarName in teamAvatarNames)
+                {
+                    var shieldIndex = GetRolePriorityIndex(shieldList, avatarName);
+                    Logger.LogDebug($"角色 {avatarName} 在护盾排列中的索引: {shieldIndex}");
+                    if (shieldIndex >= 0 && shieldIndex < minShieldIndex)
+                    {
+                        minShieldIndex = shieldIndex;
+                        highestPriorityShieldRole = avatarName;
+                    }
+                }
+            }
+            
+            // 找出当前队伍中在治疗排列中最靠前的角色
+            string highestPriorityHealRole = null;
+            int minHealIndex = int.MaxValue;
+            if (_rolePriorityConfig.TryGetValue("治疗排列", out var healList))
+            {
+                Logger.LogDebug($"治疗排列列表长度: {healList.Count}");
+                foreach (var avatarName in teamAvatarNames)
+                {
+                    var healIndex = GetRolePriorityIndex(healList, avatarName);
+                    Logger.LogDebug($"角色 {avatarName} 在治疗排列中的索引: {healIndex}");
+                    if (healIndex >= 0 && healIndex < minHealIndex)
+                    {
+                        minHealIndex = healIndex;
+                        highestPriorityHealRole = avatarName;
+                    }
+                }
+            }
+            
+            // 获取前台排列顺序
+            var frontlineOrder = new List<string>();
+            if (_rolePriorityConfig.TryGetValue("前台排列", out var frontlineList))
+            {
+                Logger.LogDebug($"前台排列列表长度: {frontlineList.Count}");
+                // 只显示当前队伍中的角色在前台排列中的顺序
+                frontlineOrder = frontlineList.Where(role => teamAvatarNames.Contains(role)).ToList();
+                Logger.LogDebug($"前台排列中找到的队伍角色数量: {frontlineOrder.Count}");
+            }
+            else
+            {
+                frontlineOrder = teamAvatarNames.ToList(); // 如果没有前台排列配置，使用队伍顺序
+            }
+            
+            // 输出队伍信息（只在第一次执行时输出，避免重复）
+            if (!_hasOutputTeamInfo)
+            {
+                Logger.LogInformation($"=== 万能自动战斗开始 ===");
+                Logger.LogInformation($"队伍角色: [{string.Join(", ", teamAvatarNames)}]");
+                Logger.LogInformation($"盾位最优先: {(highestPriorityShieldRole ?? "无")}");
+                Logger.LogInformation($"治疗位最优先: {(highestPriorityHealRole ?? "无")}");
+                Logger.LogInformation($"前台顺序: [{string.Join(" > ", frontlineOrder)}]");
+                _hasOutputTeamInfo = true;
+            }
+
+            // 计算所有出招表的真实优先级，并记录详细的计算过程
+            var priorityList = new List<(string AvatarName, UniversalAutoFightParser.CombatTableConfig Config, int Priority, string CalculationDetails)>();
             
             foreach (var kvp in allCombatTables)
             {
@@ -96,8 +251,8 @@ public class UniversalAutoFightTask
                 
                 foreach (var config in configs)
                 {
-                    var realPriority = CalculateRealPriority(avatarName, config);
-                    priorityList.Add((avatarName, config, realPriority));
+                    var (realPriority, calculationDetails) = CalculateRealPriorityWithDetails(avatarName, config, highestPriorityShieldRole, highestPriorityHealRole);
+                    priorityList.Add((avatarName, config, realPriority, calculationDetails));
                 }
             }
             
@@ -107,25 +262,100 @@ public class UniversalAutoFightTask
                 return;
             }
             
-            // 选择真实优先级最小的出招表
-            var selected = priorityList.OrderBy(x => x.Priority).First();
-            var selectedAvatarName = selected.AvatarName;
-            var selectedConfig = selected.Config;
-            var selectedPriority = selected.Priority;
+            // 按优先级排序，输出前三个
+            var sortedPriorityList = priorityList.OrderBy(x => x.Priority).ToList();
+            var topThree = sortedPriorityList.Take(3).ToList();
             
-            // 日志输出：当前正在使用的出招表
-            Logger.LogInformation($"当前使用出招表: {selectedAvatarName} - 优先级: {selectedPriority}");
-            
-            // 日志输出：所有真实优先级小于10的出招表
-            var highPriorityTables = priorityList.Where(x => x.Priority < 10).ToList();
-            if (highPriorityTables.Any())
+            Logger.LogInformation($"优先级排行前三:");
+            for (int i = 0; i < topThree.Count; i++)
             {
-                var highPriorityLog = string.Join(", ", highPriorityTables.Select(x => $"{x.AvatarName}(优先级:{x.Priority})"));
-                Logger.LogInformation($"高优先级出招表(优先级<10): {highPriorityLog}");
+                var combatTableName = !string.IsNullOrEmpty(topThree[i].Config.CombatTableName) ? 
+                    $"({topThree[i].Config.CombatTableName})" : "";
+                Logger.LogInformation($"  {i + 1}. {topThree[i].AvatarName}{combatTableName} - 优先级: {topThree[i].Priority}");
             }
             
-            // 执行选中的出招表
-            TriggerCombatTable(selectedAvatarName, selectedConfig);
+            // 找到最小优先级
+            var minPriority = sortedPriorityList.First().Priority;
+            var candidates = sortedPriorityList.Where(x => x.Priority == minPriority).ToList();
+            
+            // 如果只有一个候选，直接选择
+            if (candidates.Count == 1)
+            {
+                var selected = candidates[0];
+                var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
+                    $"({selected.Config.CombatTableName})" : "";
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName}");
+                Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
+                
+                // 执行选中的出招表
+                TriggerCombatTable(selected.AvatarName, selected.Config);
+                return;
+            }
+            
+            // 处理多个相同优先级的情况
+            // 1. 如果其中有护盾角色，则护盾角色优先执行
+            var shieldCandidates = candidates.Where(c => IsShieldRole(c.AvatarName)).ToList();
+            if (shieldCandidates.Any())
+            {
+                // 在护盾角色中选择前台排列最靠前的
+                var selected = shieldCandidates.OrderBy(c => GetFrontlinePriorityIndex(c.AvatarName)).First();
+                var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
+                    $"({selected.Config.CombatTableName})" : "";
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (护盾角色优先)");
+                Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
+                TriggerCombatTable(selected.AvatarName, selected.Config);
+                return;
+            }
+            
+            // 2. 其次如果其中不存在护盾角色，但存在治疗角色，则治疗角色优先
+            var healCandidates = candidates.Where(c => IsHealRole(c.AvatarName)).ToList();
+            if (healCandidates.Any())
+            {
+                // 在治疗角色中选择前台排列最靠前的
+                var selected = healCandidates.OrderBy(c => GetFrontlinePriorityIndex(c.AvatarName)).First();
+                var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
+                    $"({selected.Config.CombatTableName})" : "";
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (治疗角色优先)");
+                Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
+                TriggerCombatTable(selected.AvatarName, selected.Config);
+                return;
+            }
+            
+            // 3. 如果都不存在，则此时根据前台优先级越靠前的越优先
+            var frontlineOrdered = candidates.OrderBy(c => GetFrontlinePriorityIndex(c.AvatarName)).ToList();
+            if (frontlineOrdered.Any())
+            {
+                var selected = frontlineOrdered.First();
+                var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
+                    $"({selected.Config.CombatTableName})" : "";
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (前台优先级优先)");
+                Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
+                TriggerCombatTable(selected.AvatarName, selected.Config);
+                return;
+            }
+            
+            // 4. 如果在前面的逻辑下，仍然无法处理，也就是说是同一个角色的两个出招表具有相同的真实优先级的话，
+            // 那么对于这种情况按照出招表的名称排序，名称排得越靠前的越优先
+            var sameAvatarCandidates = candidates.GroupBy(c => c.AvatarName).FirstOrDefault(g => g.Count() > 1);
+            if (sameAvatarCandidates != null)
+            {
+                // 按照出招表名称排序（字母顺序）
+                var selected = sameAvatarCandidates.OrderBy(c => c.Config.CombatTableName ?? "").First();
+                var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
+                    $"({selected.Config.CombatTableName})" : "";
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (出招表名称优先)");
+                Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
+                TriggerCombatTable(selected.AvatarName, selected.Config);
+                return;
+            }
+            
+            // 最后的兜底逻辑：选择第一个
+            var finalSelected = candidates.First();
+            var finalCombatTableName = !string.IsNullOrEmpty(finalSelected.Config.CombatTableName) ? 
+                $"({finalSelected.Config.CombatTableName})" : "";
+            Logger.LogInformation($"选择出招表: {finalSelected.AvatarName}{finalCombatTableName} (兜底选择)");
+            Logger.LogInformation($"详细计算: {finalSelected.CalculationDetails}");
+            TriggerCombatTable(finalSelected.AvatarName, finalSelected.Config);
         }
         catch (Exception ex)
         {
@@ -150,8 +380,6 @@ public class UniversalAutoFightTask
     /// <param name="config">出招表配置</param>
     private void TriggerCombatTable(string avatarName, UniversalAutoFightParser.CombatTableConfig config)
     {
-
-        
         // 2. 覆盖技能CD（仅限第一行声明的技能）- 这些是新设置的CD，不应该立即被减少
         if (!_skillCooldowns.ContainsKey(avatarName))
         {
@@ -336,13 +564,17 @@ public class UniversalAutoFightTask
     }
     
     /// <summary>
-    /// 计算出招表的真实优先级
+    /// 计算出招表的真实优先级并返回详细的计算过程
     /// </summary>
     /// <param name="avatarName">角色名</param>
     /// <param name="config">出招表配置</param>
-    /// <returns>真实优先级</returns>
-    private int CalculateRealPriority(string avatarName, UniversalAutoFightParser.CombatTableConfig config)
+    /// <param name="highestPriorityShieldRole">当前队伍中护盾排列最靠前的角色</param>
+    /// <param name="highestPriorityHealRole">当前队伍中治疗排列最靠前的角色</param>
+    /// <returns>真实优先级和计算详情</returns>
+    private (int Priority, string CalculationDetails) CalculateRealPriorityWithDetails(string avatarName, UniversalAutoFightParser.CombatTableConfig config, string highestPriorityShieldRole, string highestPriorityHealRole)
     {
+        var calculationSteps = new List<string>();
+        
         // 规则3：当出招表内涉及的技能正在冷却中时，该出招表的真实优先级固定维持11
         bool hasSkillInCooldown = false;
         foreach (var skillCd in config.SkillCooldowns)
@@ -356,7 +588,8 @@ public class UniversalAutoFightTask
         
         if (hasSkillInCooldown)
         {
-            return 11; // 固定优先级11，不可被减免
+            calculationSteps.Add("技能冷却中");
+            return (11, $"优先级11 ({string.Join(", ", calculationSteps)})"); // 固定优先级11，不可被减免
         }
         
         // 获取出招表特定的累计执行时间（角色名+最大持续时间作为唯一标识）
@@ -376,6 +609,7 @@ public class UniversalAutoFightTask
         
         // 获取基础优先级（使用出招表特定的累计时间来计算动态优先级）
         int basePriority = config.PriorityConfig.GetCurrentPriority(elapsedTime, elapsedTime > 0);
+        calculationSteps.Add($"出招表优先级{basePriority}");
         
         // 规则2：当某个角色为前台角色时，他的所有出招表真实优先级减一
         try
@@ -384,6 +618,7 @@ public class UniversalAutoFightTask
             if (currentAvatarName != null && currentAvatarName == avatarName)
             {
                 basePriority = Math.Max(1, basePriority - 1); // 确保优先级不低于1
+                calculationSteps.Add("前台角色减1");
             }
         }
         catch (Exception ex)
@@ -391,8 +626,36 @@ public class UniversalAutoFightTask
             Logger.LogWarning(ex, "获取当前出战角色失败");
         }
         
+        // 新增规则：在当前队伍中，护盾排列最靠前的角色优先级-1（即更优先）
+        if (highestPriorityShieldRole != null && avatarName == highestPriorityShieldRole)
+        {
+            basePriority = Math.Max(1, basePriority - 1);
+            calculationSteps.Add("盾位减1");
+        }
+        
+        // 新增规则：在当前队伍中，治疗排列最靠前的角色优先级也减一
+        if (highestPriorityHealRole != null && avatarName == highestPriorityHealRole)
+        {
+            basePriority = Math.Max(1, basePriority - 1);
+            calculationSteps.Add("治疗减1");
+        }
+        
         // 规则1：真实优先级越小越优先（已经通过数值体现）
-        return basePriority;
+        return (basePriority, $"优先级{basePriority} ({string.Join(", ", calculationSteps)})");
+    }
+    
+    /// <summary>
+    /// 计算出招表的真实优先级（旧版本，保持兼容性）
+    /// </summary>
+    /// <param name="avatarName">角色名</param>
+    /// <param name="config">出招表配置</param>
+    /// <param name="highestPriorityShieldRole">当前队伍中护盾排列最靠前的角色</param>
+    /// <param name="highestPriorityHealRole">当前队伍中治疗排列最靠前的角色</param>
+    /// <returns>真实优先级</returns>
+    private int CalculateRealPriority(string avatarName, UniversalAutoFightParser.CombatTableConfig config, string highestPriorityShieldRole, string highestPriorityHealRole)
+    {
+        var (priority, _) = CalculateRealPriorityWithDetails(avatarName, config, highestPriorityShieldRole, highestPriorityHealRole);
+        return priority;
     }
     
     /// <summary>

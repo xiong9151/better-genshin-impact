@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Microsoft.Extensions.Logging;
+using YamlDotNet.Serialization;
 using static BetterGenshinImpact.GameTask.Common.TaskControl;
 
 namespace BetterGenshinImpact.GameTask.AutoFight.Universal;
@@ -110,6 +111,7 @@ public class UniversalAutoFightParser
         public List<SkillCooldown> SkillCooldowns { get; set; } = new List<SkillCooldown>();
         public PriorityConfig PriorityConfig { get; set; }
         public List<string> Commands { get; set; } = new List<string>(); // 指令列表
+        public string CombatTableName { get; set; } // 出招表标识名称（从文件名中提取）
         
         public CombatTableConfig(double maxDuration)
         {
@@ -212,6 +214,18 @@ public class UniversalAutoFightParser
         }
 
         var config = new CombatTableConfig(maxDuration);
+        
+        // 从文件路径中提取出招表标识名称（出招表_***.txt 中的 *** 部分）
+        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        if (fileName.StartsWith("出招表_"))
+        {
+            config.CombatTableName = fileName.Substring("出招表_".Length);
+        }
+        else
+        {
+            config.CombatTableName = fileName; // 如果不符合命名规范，使用完整文件名
+        }
+
         var skillParts = parts[1].Split(';');
         
         foreach (var skillPart in skillParts)
@@ -335,5 +349,36 @@ public class UniversalAutoFightParser
         }
 
         return new SkillCooldown(skillName, cooldownTime);
+    }
+
+    /// <summary>
+    /// 读取角色优先级配置文件
+    /// </summary>
+    /// <returns>角色优先级配置字典，如果文件不存在或读取失败则返回null</returns>
+    public Dictionary<string, List<string>> ReadRolePriorityConfig()
+    {
+        var universalPath = Path.Combine("User", "UniversalAutoFight");
+        var priorityFile = Path.Combine(universalPath, "角色优先级.yaml");
+        
+        if (!File.Exists(priorityFile))
+        {
+            Logger.LogWarning("角色优先级配置文件不存在: {Path}", priorityFile);
+            return null;
+        }
+
+        try
+        {
+            var yamlContent = File.ReadAllText(priorityFile);
+            var deserializer = new DeserializerBuilder().Build();
+            var config = deserializer.Deserialize<Dictionary<string, List<string>>>(yamlContent);
+            
+            Logger.LogInformation("成功读取角色优先级配置文件: {Path}", priorityFile);
+            return config;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "读取角色优先级配置文件失败: {Path}", priorityFile);
+            return null;
+        }
     }
 }
