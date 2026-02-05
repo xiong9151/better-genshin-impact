@@ -94,11 +94,13 @@ public class UniversalAutoFightParser
     {
         public string SkillName { get; set; }
         public double CooldownTime { get; set; }
+        public double AcceptedCooldownTime { get; set; } // 接受的CD时间，如果技能CD小于此值，则不会触发优先级11
         
-        public SkillCooldown(string skillName, double cooldownTime)
+        public SkillCooldown(string skillName, double cooldownTime, double acceptedCooldownTime = 0)
         {
             SkillName = skillName;
             CooldownTime = cooldownTime;
+            AcceptedCooldownTime = acceptedCooldownTime;
         }
     }
 
@@ -199,7 +201,10 @@ public class UniversalAutoFightParser
             return null;
         }
 
-        // 解析格式：<最大持续时间> <技能名>:<CD时间>[;<技能名>:<CD时间>]*
+        // 解析格式：<最大持续时间> <技能名>:<CD时间>[:<接受的CD时间>][;<技能名>:<CD时间>[:<接受的CD时间>]]*
+        // 接受的CD时间指的是如果对应的技能CD小于接受的CD时间时该优先级不会被固定为11，
+        // 只有当对应技能的真实CD大于接受的CD时间时，该出招表的优先级才会被固定为11，
+        // 接受的CD时间这一项可以省略，若省略则默认为零。
         var parts = firstLine.Split(new char[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length != 2)
         {
@@ -318,7 +323,7 @@ public class UniversalAutoFightParser
     /// <summary>
     /// 解析单个技能CD配置
     /// </summary>
-    /// <param name="skillPart">技能部分字符串，格式为"技能名:CD时间"</param>
+    /// <param name="skillPart">技能部分字符串，格式为"技能名:CD时间"或"技能名:CD时间:接受的CD时间"</param>
     /// <returns>技能CD信息</returns>
     private SkillCooldown ParseSkillCooldown(string skillPart)
     {
@@ -334,21 +339,46 @@ public class UniversalAutoFightParser
         }
 
         var skillName = trimmedPart.Substring(0, colonIndex).Trim();
-        var cooldownStr = trimmedPart.Substring(colonIndex + 1).Trim();
+        var remainingPart = trimmedPart.Substring(colonIndex + 1).Trim();
 
-        if (string.IsNullOrEmpty(skillName) || string.IsNullOrEmpty(cooldownStr))
+        if (string.IsNullOrEmpty(skillName) || string.IsNullOrEmpty(remainingPart))
         {
             Logger.LogWarning("技能CD格式错误，技能名或CD时间为空: {Part}", trimmedPart);
             return null;
         }
 
-        if (!double.TryParse(cooldownStr, out var cooldownTime) || cooldownTime <= 0)
+        // 支持两种格式：CD时间 或 CD时间:接受的CD时间
+        var timeParts = remainingPart.Split(':');
+        if (timeParts.Length == 1)
         {
-            Logger.LogWarning("技能CD时间必须是正数: {Cooldown}", cooldownStr);
+            // 格式：技能名:CD时间
+            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime <= 0)
+            {
+                Logger.LogWarning("技能CD时间必须是正数: {Cooldown}", timeParts[0]);
+                return null;
+            }
+            return new SkillCooldown(skillName, cooldownTime, 0); // 默认接受的CD时间为0
+        }
+        else if (timeParts.Length == 2)
+        {
+            // 格式：技能名:CD时间:接受的CD时间
+            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime <= 0)
+            {
+                Logger.LogWarning("技能CD时间必须是正数: {Cooldown}", timeParts[0]);
+                return null;
+            }
+            if (!double.TryParse(timeParts[1], out var acceptedCooldownTime) || acceptedCooldownTime < 0)
+            {
+                Logger.LogWarning("接受的CD时间必须是非负数: {AcceptedCooldown}", timeParts[1]);
+                return null;
+            }
+            return new SkillCooldown(skillName, cooldownTime, acceptedCooldownTime);
+        }
+        else
+        {
+            Logger.LogWarning("技能CD格式错误，最多只能有两个冒号: {Part}", trimmedPart);
             return null;
         }
-
-        return new SkillCooldown(skillName, cooldownTime);
     }
 
     /// <summary>

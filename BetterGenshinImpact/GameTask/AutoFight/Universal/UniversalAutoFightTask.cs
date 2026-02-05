@@ -564,6 +564,23 @@ public class UniversalAutoFightTask
     }
     
     /// <summary>
+    /// 获取技能的实际剩余冷却时间
+    /// </summary>
+    /// <param name="avatarName">角色名</param>
+    /// <param name="skillName">技能名</param>
+    /// <returns>剩余冷却时间，如果技能不在冷却中则返回0</returns>
+    private double GetSkillRemainingCooldown(string avatarName, string skillName)
+    {
+        if (!_skillCooldowns.ContainsKey(avatarName))
+        {
+            return 0;
+        }
+        
+        var skillCd = _skillCooldowns[avatarName].FirstOrDefault(cd => cd.SkillName == skillName);
+        return skillCd?.RemainingCooldown ?? 0;
+    }
+    
+    /// <summary>
     /// 计算出招表的真实优先级并返回详细的计算过程
     /// </summary>
     /// <param name="avatarName">角色名</param>
@@ -576,19 +593,26 @@ public class UniversalAutoFightTask
         var calculationSteps = new List<string>();
         
         // 规则3：当出招表内涉及的技能正在冷却中时，该出招表的真实优先级固定维持11
-        bool hasSkillInCooldown = false;
+        // 修改：只有当技能的真实CD大于接受的CD时间时，才会触发优先级11
+        bool shouldFixPriorityTo11 = false;
         foreach (var skillCd in config.SkillCooldowns)
         {
             if (IsSkillOnCooldown(avatarName, skillCd.SkillName))
             {
-                hasSkillInCooldown = true;
-                break;
+                // 获取技能的实际剩余冷却时间
+                var actualRemainingCooldown = GetSkillRemainingCooldown(avatarName, skillCd.SkillName);
+                // 如果实际CD时间大于接受的CD时间，则触发优先级11
+                if (actualRemainingCooldown > skillCd.AcceptedCooldownTime)
+                {
+                    shouldFixPriorityTo11 = true;
+                    break;
+                }
             }
         }
         
-        if (hasSkillInCooldown)
+        if (shouldFixPriorityTo11)
         {
-            calculationSteps.Add("技能冷却中");
+            calculationSteps.Add("技能冷却超过接受值");
             return (11, $"优先级11 ({string.Join(", ", calculationSteps)})"); // 固定优先级11，不可被减免
         }
         
