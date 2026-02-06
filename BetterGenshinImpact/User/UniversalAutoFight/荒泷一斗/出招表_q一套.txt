@@ -1,0 +1,3 @@
+12.8 e:10;q:18
+6
+q,e,attack,attack,mousedown(left),wait(1000),mouseup(left),attack,attack,attack,attack,mousedown(left),wait(1000),mouseup(left),e,mousedown(left),wait(1000),mouseup(left)
