@@ -34,15 +34,16 @@ public class UniversalCombatCommandExecutor
     public void ExecuteCommands(List<string> commands)
     {
         _startTime = DateTime.Now;
-        _maxEndTime = _startTime.AddSeconds(_maxDuration);
+        // 如果_maxDuration为0，不设置超时限制
+        _maxEndTime = _maxDuration > 0 ? _startTime.AddSeconds(_maxDuration) : DateTime.MaxValue;
 
         foreach (var commandLine in commands)
         {
             if (_cancellationToken.IsCancellationRequested)
                 return;
 
-            // 检查是否超过最大持续时间
-            if (DateTime.Now >= _maxEndTime)
+            // 检查是否超过最大持续时间（仅当_maxDuration > 0时）
+            if (_maxDuration > 0 && DateTime.Now >= _maxEndTime)
             {
                 Logger.LogInformation("出招表执行超时，停止执行剩余指令");
                 break;
@@ -61,15 +62,16 @@ public class UniversalCombatCommandExecutor
     {
         var startTime = DateTime.Now;
         _startTime = startTime;
-        _maxEndTime = startTime.AddSeconds(_maxDuration);
+        // 如果_maxDuration为0，不设置超时限制
+        _maxEndTime = _maxDuration > 0 ? startTime.AddSeconds(_maxDuration) : DateTime.MaxValue;
 
         foreach (var commandLine in commands)
         {
             if (_cancellationToken.IsCancellationRequested)
                 return (DateTime.Now - startTime).TotalSeconds;
 
-            // 检查是否超过最大持续时间
-            if (DateTime.Now >= _maxEndTime)
+            // 检查是否超过最大持续时间（仅当_maxDuration > 0时）
+            if (_maxDuration > 0 && DateTime.Now >= _maxEndTime)
             {
                 Logger.LogInformation("出招表执行超时，停止执行剩余指令");
                 break;

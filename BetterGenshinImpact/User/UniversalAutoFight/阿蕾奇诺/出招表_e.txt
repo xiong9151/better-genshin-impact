@@ -1,3 +1,3 @@
 0 e:14
 1
-attack,wait(0.02),e
+attack,e

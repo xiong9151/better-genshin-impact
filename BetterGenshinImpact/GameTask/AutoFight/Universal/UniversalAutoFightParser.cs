@@ -61,18 +61,17 @@ public class UniversalAutoFightParser
         /// <returns>当前优先级数值</returns>
         public int GetCurrentPriority(double elapsedTime, bool isExecuted)
         {
-            if (!isExecuted)
-            {
-                return DefaultPriority; // 未执行时使用常态优先级（动态优先级的第5个值，或静态优先级的值）
-            }
-            
             if (Type == PriorityType.Static)
             {
                 return StaticPriority;
             }
             else // Dynamic
             {
-                if (elapsedTime >= StartTime && elapsedTime <= EndTime)
+                if (!isExecuted)
+                {
+                    return DefaultPriority; // 未执行时使用默认优先级
+                }
+                else if (elapsedTime >= StartTime && elapsedTime <= EndTime)
                 {
                     // 线性插值计算优先级
                     var ratio = (elapsedTime - StartTime) / (EndTime - StartTime);
@@ -81,7 +80,49 @@ public class UniversalAutoFightParser
                 }
                 else
                 {
-                    return DefaultPriority; // 不在指定时间段内时使用常态优先级（动态优先级的第5个值）
+                    return DefaultPriority; // 超出时间范围后也使用默认优先级
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 获取当前优先级值和详细的计算过程
+        /// </summary>
+        /// <param name="elapsedTime">已执行时间（秒）</param>
+        /// <param name="isExecuted">是否已经执行过</param>
+        /// <returns>优先级值和计算详情</returns>
+        public (int Priority, string CalculationDetails) GetCurrentPriorityWithDetails(double elapsedTime, bool isExecuted)
+        {
+            if (Type == PriorityType.Static)
+            {
+                return (StaticPriority, $"静态优先级: {StaticPriority}");
+            }
+            else // Dynamic
+            {
+                if (!isExecuted)
+                {
+                    return (DefaultPriority, $"动态优先级: 未执行, 使用默认优先级 {DefaultPriority}");
+                }
+                else if (elapsedTime < StartTime)
+                {
+                    // 在 [0, StartTime) 区间，使用默认优先级
+                    return (DefaultPriority, $"动态优先级: 执行时间 {elapsedTime:F2}s < 起始时间 {StartTime:F2}s, 使用默认优先级 {DefaultPriority}");
+                }
+                else if (elapsedTime >= StartTime && elapsedTime <= EndTime)
+                {
+                    // 在 [StartTime, EndTime] 区间，使用插值计算
+                    var ratio = (elapsedTime - StartTime) / (EndTime - StartTime);
+                    var priority = StartPriority + (EndPriority - StartPriority) * ratio;
+                    var roundedPriority = (int)Math.Round(priority);
+                    var details = $"动态优先级: 执行时间 {elapsedTime:F2}s, 时间范围 [{StartTime:F2}-{EndTime:F2}]s, " +
+                                 $"优先级范围 [{StartPriority}-{EndPriority}], " +
+                                 $"插值比例 {ratio:F3}, 计算值 {priority:F2}, 四舍五入 {roundedPriority}";
+                    return (roundedPriority, details);
+                }
+                else
+                {
+                    // 在 (EndTime, ∞) 区间，使用默认优先级
+                    return (DefaultPriority, $"动态优先级: 执行时间 {elapsedTime:F2}s > 结束时间 {EndTime:F2}s, 使用默认优先级 {DefaultPriority}");
                 }
             }
         }
@@ -206,7 +247,7 @@ public class UniversalAutoFightParser
         // 只有当对应技能的真实CD大于接受的CD时间时，该出招表的优先级才会被固定为11，
         // 接受的CD时间这一项可以省略，若省略则默认为零。
         var parts = firstLine.Split(new char[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0 || !double.TryParse(parts[0], out var maxDuration) || maxDuration <= 0)
+        if (parts.Length == 0 || !double.TryParse(parts[0], out var maxDuration) || maxDuration < 0)
         {
             Logger.LogError("出招表格式错误，第一行必须包含有效的最大持续时间: {Value}", firstLine);
             throw new FormatException("出招表格式错误");
@@ -307,7 +348,7 @@ public class UniversalAutoFightParser
                     return new PriorityConfig(startTime, endTime, startPriority, endPriority, defaultPriority);
                 }
             }
-            // 尝试4个部分（没有默认优先级，默认为1）
+            // 尝试4个部分（没有默认优先级，默认为10）
             else if (parts.Length >= 4)
             {
                 if (double.TryParse(parts[0], out var startTime) &&
@@ -319,16 +360,16 @@ public class UniversalAutoFightParser
                     if (startPriority < 1 || startPriority > 10 ||
                         endPriority < 1 || endPriority > 10)
                     {
-                        Logger.LogWarning("动态优先级值超出范围(1-10)，使用默认优先级1: {Line}", priorityLine);
-                        return new PriorityConfig(1);
+                        Logger.LogWarning("动态优先级值超出范围(1-10)，使用默认优先级10: {Line}", priorityLine);
+                        return new PriorityConfig(10);
                     }
                     // 验证时间范围
                     if (startTime > endTime)
                     {
-                        Logger.LogWarning("动态优先级时间范围错误（时间1 > 时间2），使用默认优先级1: {Line}", priorityLine);
-                        return new PriorityConfig(1);
+                        Logger.LogWarning("动态优先级时间范围错误（时间1 > 时间2），使用默认优先级10: {Line}", priorityLine);
+                        return new PriorityConfig(10);
                     }
-                    return new PriorityConfig(startTime, endTime, startPriority, endPriority, 1);
+                    return new PriorityConfig(startTime, endTime, startPriority, endPriority, 10);
                 }
             }
         }
@@ -340,15 +381,15 @@ public class UniversalAutoFightParser
                 // 验证优先级范围 (1-10)
                 if (staticPriority < 1 || staticPriority > 10)
                 {
-                    Logger.LogWarning("静态优先级值超出范围(1-10)，使用默认优先级1: {Line}", priorityLine);
-                    return new PriorityConfig(1);
+                    Logger.LogWarning("静态优先级值超出范围(1-10)，使用默认优先级10: {Line}", priorityLine);
+                    return new PriorityConfig(10);
                 }
                 return new PriorityConfig(staticPriority);
             }
         }
 
-        Logger.LogWarning("优先级格式无法识别，默认使用优先级1: {Line}", priorityLine);
-        return new PriorityConfig(1);
+        Logger.LogWarning("优先级格式无法识别，默认使用优先级10: {Line}", priorityLine);
+        return new PriorityConfig(10);
     }
 
     /// <summary>
@@ -383,9 +424,9 @@ public class UniversalAutoFightParser
         if (timeParts.Length == 1)
         {
             // 格式：技能名:CD时间
-            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime <= 0)
+            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime < 0)
             {
-                Logger.LogWarning("技能CD时间必须是正数: {Cooldown}", timeParts[0]);
+                Logger.LogWarning("技能CD时间必须是非负数: {Cooldown}", timeParts[0]);
                 return null;
             }
             return new SkillCooldown(skillName, cooldownTime, 0); // 默认接受的CD时间为0
@@ -393,9 +434,9 @@ public class UniversalAutoFightParser
         else if (timeParts.Length == 2)
         {
             // 格式：技能名:CD时间:接受的CD时间
-            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime <= 0)
+            if (!double.TryParse(timeParts[0], out var cooldownTime) || cooldownTime < 0)
             {
-                Logger.LogWarning("技能CD时间必须是正数: {Cooldown}", timeParts[0]);
+                Logger.LogWarning("技能CD时间必须是非负数: {Cooldown}", timeParts[0]);
                 return null;
             }
             if (!double.TryParse(timeParts[1], out var acceptedCooldownTime) || acceptedCooldownTime < 0)
