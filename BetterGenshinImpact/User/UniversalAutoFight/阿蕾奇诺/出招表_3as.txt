@@ -1,3 +1,3 @@
-1
+0
 5
-mousedown(left),wait(0.02),mouseup(left),wait(0.13),mousedown(left),wait(0.02),mouseup(left),wait(0.35),mousedown(left),wait(0.02),mouseup(left),wait(0.45),mousedown(right),wait(0.1),mouseup(right)
+mousedown(left),wait(0.02),mouseup(left),wait(0.13),mousedown(left),wait(0.02),mouseup(left),wait(0.35),mousedown(left),wait(0.02),mouseup(left),wait(0.45),mousedown(right),wait(0.1),mouseup(right),wait(0.5)

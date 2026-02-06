@@ -206,16 +206,10 @@ public class UniversalAutoFightParser
         // 只有当对应技能的真实CD大于接受的CD时间时，该出招表的优先级才会被固定为11，
         // 接受的CD时间这一项可以省略，若省略则默认为零。
         var parts = firstLine.Split(new char[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2)
+        if (parts.Length == 0 || !double.TryParse(parts[0], out var maxDuration) || maxDuration <= 0)
         {
-            Logger.LogError("出招表格式错误，应为：<最大持续时间> <技能名>:<CD时间>[;<技能名>:<CD时间>]*");
+            Logger.LogError("出招表格式错误，第一行必须包含有效的最大持续时间: {Value}", firstLine);
             throw new FormatException("出招表格式错误");
-        }
-
-        if (!double.TryParse(parts[0], out var maxDuration) || maxDuration <= 0)
-        {
-            Logger.LogError("最大持续时间必须是正数: {Value}", parts[0]);
-            throw new FormatException("最大持续时间格式错误");
         }
 
         var config = new CombatTableConfig(maxDuration);
@@ -231,14 +225,18 @@ public class UniversalAutoFightParser
             config.CombatTableName = fileName; // 如果不符合命名规范，使用完整文件名
         }
 
-        var skillParts = parts[1].Split(';');
-        
-        foreach (var skillPart in skillParts)
+        // 解析技能冷却信息（如果存在）
+        if (parts.Length >= 2 && !string.IsNullOrEmpty(parts[1]))
         {
-            var skillCooldown = ParseSkillCooldown(skillPart);
-            if (skillCooldown != null)
+            var skillParts = parts[1].Split(';');
+            
+            foreach (var skillPart in skillParts)
             {
-                config.SkillCooldowns.Add(skillCooldown);
+                var skillCooldown = ParseSkillCooldown(skillPart);
+                if (skillCooldown != null)
+                {
+                    config.SkillCooldowns.Add(skillCooldown);
+                }
             }
         }
 
@@ -292,6 +290,20 @@ public class UniversalAutoFightParser
                     int.TryParse(parts[3], out var endPriority) &&
                     int.TryParse(parts[4], out var defaultPriority))
                 {
+                    // 验证优先级范围 (1-10)
+                    if (startPriority < 1 || startPriority > 10 ||
+                        endPriority < 1 || endPriority > 10 ||
+                        defaultPriority < 1 || defaultPriority > 10)
+                    {
+                        Logger.LogWarning("动态优先级值超出范围(1-10)，使用默认优先级10: {Line}", priorityLine);
+                        return new PriorityConfig(10);
+                    }
+                    // 验证时间范围
+                    if (startTime > endTime)
+                    {
+                        Logger.LogWarning("动态优先级时间范围错误（时间1 > 时间2），使用默认优先级10: {Line}", priorityLine);
+                        return new PriorityConfig(10);
+                    }
                     return new PriorityConfig(startTime, endTime, startPriority, endPriority, defaultPriority);
                 }
             }
@@ -303,6 +315,19 @@ public class UniversalAutoFightParser
                     int.TryParse(parts[2], out var startPriority) &&
                     int.TryParse(parts[3], out var endPriority))
                 {
+                    // 验证优先级范围 (1-10)
+                    if (startPriority < 1 || startPriority > 10 ||
+                        endPriority < 1 || endPriority > 10)
+                    {
+                        Logger.LogWarning("动态优先级值超出范围(1-10)，使用默认优先级1: {Line}", priorityLine);
+                        return new PriorityConfig(1);
+                    }
+                    // 验证时间范围
+                    if (startTime > endTime)
+                    {
+                        Logger.LogWarning("动态优先级时间范围错误（时间1 > 时间2），使用默认优先级1: {Line}", priorityLine);
+                        return new PriorityConfig(1);
+                    }
                     return new PriorityConfig(startTime, endTime, startPriority, endPriority, 1);
                 }
             }
@@ -312,6 +337,12 @@ public class UniversalAutoFightParser
             // 静态优先级：<优先级c>
             if (int.TryParse(priorityLine, out var staticPriority))
             {
+                // 验证优先级范围 (1-10)
+                if (staticPriority < 1 || staticPriority > 10)
+                {
+                    Logger.LogWarning("静态优先级值超出范围(1-10)，使用默认优先级1: {Line}", priorityLine);
+                    return new PriorityConfig(1);
+                }
                 return new PriorityConfig(staticPriority);
             }
         }

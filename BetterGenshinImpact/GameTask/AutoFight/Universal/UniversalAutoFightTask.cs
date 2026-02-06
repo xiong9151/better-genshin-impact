@@ -11,23 +11,28 @@ using BetterGenshinImpact.GameTask.AutoFight.Universal;
 
 /// <summary>
 /// UniversalAutoFight任务类，用于管理角色技能CD和出招表优先级
-/// 采用预测式时间管理，使用全局时间而非每个角色独立时间
+/// 采用预测式时间管理，基于出招表执行来推进虚拟时间，而非实时时间
+/// CD管理完全依赖出招表的执行：每次执行出招表时，所有技能CD都会减少该出招表的持续时间
+/// 支持特殊模式：当出招表第一行持续时间设置为0时，系统会使用实际执行时间进行CD计算和优先级更新
 /// </summary>
 public class UniversalAutoFightTask
 {
     private readonly CombatScenes _combatScenes;
     private readonly UniversalAutoFightParser _parser;
     
-    // 角色优先级配置
+    // 角色优先级配置（护盾排列、治疗排列、前台排列）
     private readonly Dictionary<string, List<string>> _rolePriorityConfig;
     
-    // 记录每个出招表的最后执行时间（角色名 + 出招表最大持续时间作为唯一标识）
+    // 记录每个动态优先级出招表的累计执行时间（角色名 + 出招表名称作为唯一标识）
     private Dictionary<string, double> _combatTableLastExecutionTime = new Dictionary<string, double>();
     
-    // 技能CD信息字典（角色名 -> 技能CD列表）
+    // 记录每个动态优先级出招表是否已经执行过（角色名 + 出招表名称作为唯一标识）
+    private HashSet<string> _combatTableExecuted = new HashSet<string>();
+    
+    // 技能CD信息字典（角色名 -> 技能CD列表），包含所有已设置的技能CD，即使CD为0也会保留
     private Dictionary<string, List<SkillCooldownInfo>> _skillCooldowns = new Dictionary<string, List<SkillCooldownInfo>>();
     
-    // 标记是否已经输出过队伍信息
+    // 标记是否已经输出过队伍信息（仅在首次执行时输出）
     private bool _hasOutputTeamInfo = false;
     
     // 技能CD信息（基于预测时间）
@@ -138,9 +143,10 @@ public class UniversalAutoFightTask
     }
     
     /// <summary>
-    /// 减少所有角色的所有技能CD
+    /// 减少所有角色的所有技能CD（基于出招表执行的虚拟时间流逝）
+    /// 注意：即使CD减少到0，也会保留技能记录，以确保CD检查逻辑能正确识别技能状态
     /// </summary>
-    /// <param name="timeElapsed">经过的时间</param>
+    /// <param name="timeElapsed">经过的虚拟时间（通常为出招表的持续时间）</param>
     private void ReduceAllSkillCooldowns(double timeElapsed)
     {
         foreach (var avatarCooldowns in _skillCooldowns.Values)
@@ -148,11 +154,11 @@ public class UniversalAutoFightTask
             for (int i = avatarCooldowns.Count - 1; i >= 0; i--)
             {
                 avatarCooldowns[i].RemainingCooldown = Math.Max(0, avatarCooldowns[i].RemainingCooldown - timeElapsed);
-                // 如果CD为0，移除以节省内存
-                if (avatarCooldowns[i].RemainingCooldown <= 0)
-                {
-                    avatarCooldowns.RemoveAt(i);
-                }
+                // 不再移除CD为0的技能，以确保CD检查逻辑正确工作
+                // if (avatarCooldowns[i].RemainingCooldown <= 0)
+                // {
+                //     avatarCooldowns.RemoveAt(i);
+                // }
             }
         }
     }
@@ -264,15 +270,6 @@ public class UniversalAutoFightTask
             
             // 按优先级排序，输出前三个
             var sortedPriorityList = priorityList.OrderBy(x => x.Priority).ToList();
-            var topThree = sortedPriorityList.Take(3).ToList();
-            
-            Logger.LogInformation($"优先级排行前三:");
-            for (int i = 0; i < topThree.Count; i++)
-            {
-                var combatTableName = !string.IsNullOrEmpty(topThree[i].Config.CombatTableName) ? 
-                    $"({topThree[i].Config.CombatTableName})" : "";
-                Logger.LogInformation($"  {i + 1}. {topThree[i].AvatarName}{combatTableName} - 优先级: {topThree[i].Priority}");
-            }
             
             // 找到最小优先级
             var minPriority = sortedPriorityList.First().Priority;
@@ -288,7 +285,16 @@ public class UniversalAutoFightTask
                 Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
                 
                 // 执行选中的出招表
-                TriggerCombatTable(selected.AvatarName, selected.Config);
+                var actualDuration = TriggerCombatTable(selected.AvatarName, selected.Config);
+                var presetDuration = selected.Config.MaxDuration;
+                if (presetDuration <= 0)
+                {
+                    Logger.LogInformation($"出招表执行完成: 指令耗时 {actualDuration:F2}s");
+                }
+                else
+                {
+                    Logger.LogInformation($"出招表执行完成: 预设 {presetDuration:F2}s, 指令 {actualDuration:F2}s");
+                }
                 return;
             }
             
@@ -303,7 +309,16 @@ public class UniversalAutoFightTask
                     $"({selected.Config.CombatTableName})" : "";
                 Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (护盾角色优先)");
                 Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
-                TriggerCombatTable(selected.AvatarName, selected.Config);
+                var actualDuration = TriggerCombatTable(selected.AvatarName, selected.Config);
+                var presetDuration = selected.Config.MaxDuration;
+                if (presetDuration <= 0)
+                {
+                    Logger.LogInformation($"出招表执行完成: 指令耗时 {actualDuration:F2}s");
+                }
+                else
+                {
+                    Logger.LogInformation($"出招表执行完成: 预设 {presetDuration:F2}s, 指令 {actualDuration:F2}s");
+                }
                 return;
             }
             
@@ -317,35 +332,61 @@ public class UniversalAutoFightTask
                     $"({selected.Config.CombatTableName})" : "";
                 Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (治疗角色优先)");
                 Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
-                TriggerCombatTable(selected.AvatarName, selected.Config);
+                var actualDuration = TriggerCombatTable(selected.AvatarName, selected.Config);
+                var presetDuration = selected.Config.MaxDuration;
+                if (presetDuration <= 0)
+                {
+                    Logger.LogInformation($"出招表执行完成: 指令耗时 {actualDuration:F2}s");
+                }
+                else
+                {
+                    Logger.LogInformation($"出招表执行完成: 预设 {presetDuration:F2}s, 指令 {actualDuration:F2}s");
+                }
                 return;
             }
             
-            // 3. 如果都不存在，则此时根据前台优先级越靠前的越优先
-            var frontlineOrdered = candidates.OrderBy(c => GetFrontlinePriorityIndex(c.AvatarName)).ToList();
-            if (frontlineOrdered.Any())
+            // 3. 如果既没有护盾也没有治疗角色，则按前台排列顺序选择
+            var frontlineCandidates = candidates.OrderBy(c => GetFrontlinePriorityIndex(c.AvatarName)).ToList();
+            if (frontlineCandidates.Any())
             {
-                var selected = frontlineOrdered.First();
+                var selected = frontlineCandidates.First();
                 var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
                     $"({selected.Config.CombatTableName})" : "";
-                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (前台优先级优先)");
+                Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (前台顺序)");
                 Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
-                TriggerCombatTable(selected.AvatarName, selected.Config);
+                var actualDuration = TriggerCombatTable(selected.AvatarName, selected.Config);
+                var presetDuration = selected.Config.MaxDuration;
+                if (presetDuration <= 0)
+                {
+                    Logger.LogInformation($"出招表执行完成: 指令耗时 {actualDuration:F2}s");
+                }
+                else
+                {
+                    Logger.LogInformation($"出招表执行完成: 预设 {presetDuration:F2}s, 指令 {actualDuration:F2}s");
+                }
                 return;
             }
             
-            // 4. 如果在前面的逻辑下，仍然无法处理，也就是说是同一个角色的两个出招表具有相同的真实优先级的话，
-            // 那么对于这种情况按照出招表的名称排序，名称排得越靠前的越优先
-            var sameAvatarCandidates = candidates.GroupBy(c => c.AvatarName).FirstOrDefault(g => g.Count() > 1);
-            if (sameAvatarCandidates != null)
+            // 按照出招表名称排序（字母顺序）
+            var sameAvatarCandidates = candidates.Where(c => c.AvatarName == candidates.First().AvatarName).ToList();
+            if (sameAvatarCandidates.Count > 1)
             {
-                // 按照出招表名称排序（字母顺序）
+                // 按出招表名称排序
                 var selected = sameAvatarCandidates.OrderBy(c => c.Config.CombatTableName ?? "").First();
                 var combatTableName = !string.IsNullOrEmpty(selected.Config.CombatTableName) ? 
                     $"({selected.Config.CombatTableName})" : "";
                 Logger.LogInformation($"选择出招表: {selected.AvatarName}{combatTableName} (出招表名称优先)");
                 Logger.LogInformation($"详细计算: {selected.CalculationDetails}");
-                TriggerCombatTable(selected.AvatarName, selected.Config);
+                var actualDuration = TriggerCombatTable(selected.AvatarName, selected.Config);
+                var presetDuration = selected.Config.MaxDuration;
+                if (presetDuration <= 0)
+                {
+                    Logger.LogInformation($"出招表执行完成: 指令耗时 {actualDuration:F2}s");
+                }
+                else
+                {
+                    Logger.LogInformation($"出招表执行完成: 预设 {presetDuration:F2}s, 指令 {actualDuration:F2}s");
+                }
                 return;
             }
             
@@ -355,22 +396,21 @@ public class UniversalAutoFightTask
                 $"({finalSelected.Config.CombatTableName})" : "";
             Logger.LogInformation($"选择出招表: {finalSelected.AvatarName}{finalCombatTableName} (兜底选择)");
             Logger.LogInformation($"详细计算: {finalSelected.CalculationDetails}");
-            TriggerCombatTable(finalSelected.AvatarName, finalSelected.Config);
+            var finalActualDuration = TriggerCombatTable(finalSelected.AvatarName, finalSelected.Config);
+            var finalPresetDuration = finalSelected.Config.MaxDuration;
+            if (finalPresetDuration <= 0)
+            {
+                Logger.LogInformation($"出招表执行完成: 指令耗时 {finalActualDuration:F2}s");
+            }
+            else
+            {
+                Logger.LogInformation($"出招表执行完成: 预设 {finalPresetDuration:F2}s, 指令 {finalActualDuration:F2}s");
+            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "万能自动战斗策略执行出错");
         }
-    }
-
-    /// <summary>
-    /// 每帧更新（减少所有技能CD）
-    /// </summary>
-    /// <param name="deltaTime">自上一帧以来的时间（秒）</param>
-    public void Update(double deltaTime)
-    {
-        // 减少所有技能CD
-        ReduceAllSkillCooldowns(deltaTime);
     }
     
     /// <summary>
@@ -378,93 +418,140 @@ public class UniversalAutoFightTask
     /// </summary>
     /// <param name="avatarName">角色名</param>
     /// <param name="config">出招表配置</param>
-    private void TriggerCombatTable(string avatarName, UniversalAutoFightParser.CombatTableConfig config)
+    /// <returns>实际执行时间（秒）</returns>
+    private double TriggerCombatTable(string avatarName, UniversalAutoFightParser.CombatTableConfig config)
     {
-        // 2. 覆盖技能CD（仅限第一行声明的技能）- 这些是新设置的CD，不应该立即被减少
-        if (!_skillCooldowns.ContainsKey(avatarName))
-        {
-            _skillCooldowns[avatarName] = new List<SkillCooldownInfo>();
-        }
+        // 切换角色（如果需要）
+        SwitchToAvatarIfNeeded(avatarName);
         
-        foreach (var skillCd in config.SkillCooldowns)
+        double actualDuration = 0;
+        
+        // 检查是否为持续时间为0的特殊情况
+        if (config.MaxDuration <= 0)
         {
-            // 查找是否已存在该技能的CD
-            var existingCd = _skillCooldowns[avatarName].FirstOrDefault(cd => cd.SkillName == skillCd.SkillName);
-            if (existingCd != null)
+            // 持续时间为0：执行指令后获取实际执行时间，再进行CD设置和时间更新
+            actualDuration = ExecuteCommands(config.Commands, 0);
+            
+            // 如果实际执行时间为0，使用一个很小的时间值避免除零错误
+            actualDuration = Math.Max(actualDuration, 0.01);
+            
+            // 1. 设置技能CD（仅限第一行声明的技能）
+            // 将出招表中定义的技能CD设置为完整值，覆盖已存在的CD记录
+            if (!_skillCooldowns.ContainsKey(avatarName))
             {
-                // 覆盖现有的CD
-                existingCd.RemainingCooldown = skillCd.CooldownTime;
+                _skillCooldowns[avatarName] = new List<SkillCooldownInfo>();
+            }
+            
+            foreach (var skillCd in config.SkillCooldowns)
+            {
+                // 查找是否已存在该技能的CD
+                var existingCd = _skillCooldowns[avatarName].FirstOrDefault(cd => cd.SkillName == skillCd.SkillName);
+                if (existingCd != null)
+                {
+                    // 覆盖现有的CD，确保CD值不小于0
+                    existingCd.RemainingCooldown = Math.Max(0, skillCd.CooldownTime);
+                }
+                else
+                {
+                    // 添加新的CD，确保CD值不小于0
+                    _skillCooldowns[avatarName].Add(new SkillCooldownInfo(skillCd.SkillName, Math.Max(0, skillCd.CooldownTime)));
+                }
+            }
+            
+            // 2. 更新动态优先级出招表的累计执行时间（使用实际执行时间）
+            var tableKey = $"{avatarName}_{config.CombatTableName}";
+            
+            // 只有动态优先级出招表才需要维护累计时间和执行状态
+            if (config.PriorityConfig.Type == UniversalAutoFightParser.PriorityType.Dynamic)
+            {
+                // 为所有其他动态优先级出招表的累计时间增加当前出招表的实际执行时间
+                foreach (var key in _combatTableLastExecutionTime.Keys.ToList())
+                {
+                    if (key != tableKey) // 不包括当前出招表
+                    {
+                        _combatTableLastExecutionTime[key] += actualDuration;
+                    }
+                }
+                
+                // 重置当前出招表的累计时间为0（因为刚执行完，从现在开始重新计时）
+                _combatTableLastExecutionTime[tableKey] = 0;
+                
+                // 标记当前出招表为已执行
+                _combatTableExecuted.Add(tableKey);
             }
             else
             {
-                // 添加新的CD
-                _skillCooldowns[avatarName].Add(new SkillCooldownInfo(skillCd.SkillName, skillCd.CooldownTime));
-            }
-        }
-        
-        // 3. 更新所有出招表的累计执行时间（只针对动态优先级出招表）
-        var tableKey = $"{avatarName}_{config.MaxDuration}";
-        
-        // 只有动态优先级出招表才需要维护累计时间
-        if (config.PriorityConfig.Type == UniversalAutoFightParser.PriorityType.Dynamic)
-        {
-            // 为所有动态优先级出招表的累计时间增加当前出招表的持续时间
-            foreach (var key in _combatTableLastExecutionTime.Keys.ToList())
-            {
-                _combatTableLastExecutionTime[key] += config.MaxDuration;
+                // 静态优先级出招表不需要维护累计时间，确保不创建记录
+                _combatTableLastExecutionTime.Remove(tableKey);
             }
             
-            // 重置当前出招表的累计时间为0（因为刚执行完）
-            _combatTableLastExecutionTime[tableKey] = 0;
+            // 3. 减少所有角色的所有技能CD（基于实际执行时间）
+            // 所有技能CD都会减少当前出招表的实际执行时间，包括刚刚设置的新CD
+            ReduceAllSkillCooldowns(actualDuration);
         }
         else
         {
-            // 静态优先级出招表不需要维护累计时间，确保不创建记录
-            _combatTableLastExecutionTime.Remove(tableKey);
-        }
-        
-        // 4. 减少所有角色的所有技能CD（全局时间流逝）
-        // 恢复原始逻辑：新设置的CD也应该立即被减少
-        ReduceAllSkillCooldowns(config.MaxDuration);
-        
-        // 5. 切换角色（如果需要）
-        SwitchToAvatarIfNeeded(avatarName);
-        
-        // 6. 立即执行指令（不进行任何等待）
-        ExecuteCommands(config.Commands, config.MaxDuration);
-    }
-    
-    /// <summary>
-    /// 减少所有角色的所有技能CD，但排除指定角色的指定技能（这些是新设置的CD）
-    /// </summary>
-    /// <param name="timeElapsed">经过的时间</param>
-    /// <param name="excludeAvatarName">要排除的角色名</param>
-    /// <param name="excludeSkillNames">要排除的技能名列表</param>
-    private void ReduceAllSkillCooldownsExceptNewOnes(double timeElapsed, string excludeAvatarName, List<string> excludeSkillNames)
-    {
-        foreach (var kvp in _skillCooldowns)
-        {
-            var avatarName = kvp.Key;
-            var avatarCooldowns = kvp.Value;
+            // 持续时间 > 0：正常处理流程
             
-            for (int i = avatarCooldowns.Count - 1; i >= 0; i--)
+            // 1. 设置技能CD（仅限第一行声明的技能）
+            // 将出招表中定义的技能CD设置为完整值，覆盖已存在的CD记录
+            if (!_skillCooldowns.ContainsKey(avatarName))
             {
-                var skillCd = avatarCooldowns[i];
-                
-                // 如果是新设置的技能CD，跳过减少
-                if (avatarName == excludeAvatarName && excludeSkillNames.Contains(skillCd.SkillName))
+                _skillCooldowns[avatarName] = new List<SkillCooldownInfo>();
+            }
+            
+            foreach (var skillCd in config.SkillCooldowns)
+            {
+                // 查找是否已存在该技能的CD
+                var existingCd = _skillCooldowns[avatarName].FirstOrDefault(cd => cd.SkillName == skillCd.SkillName);
+                if (existingCd != null)
                 {
-                    continue;
+                    // 覆盖现有的CD，确保CD值不小于0
+                    existingCd.RemainingCooldown = Math.Max(0, skillCd.CooldownTime);
                 }
-                
-                skillCd.RemainingCooldown = Math.Max(0, skillCd.RemainingCooldown - timeElapsed);
-                // 如果CD为0，移除以节省内存
-                if (skillCd.RemainingCooldown <= 0)
+                else
                 {
-                    avatarCooldowns.RemoveAt(i);
+                    // 添加新的CD，确保CD值不小于0
+                    _skillCooldowns[avatarName].Add(new SkillCooldownInfo(skillCd.SkillName, Math.Max(0, skillCd.CooldownTime)));
                 }
             }
+            
+            // 2. 更新动态优先级出招表的累计执行时间
+            var tableKey = $"{avatarName}_{config.CombatTableName}";
+            
+            // 只有动态优先级出招表才需要维护累计时间和执行状态
+            if (config.PriorityConfig.Type == UniversalAutoFightParser.PriorityType.Dynamic)
+            {
+                // 为所有其他动态优先级出招表的累计时间增加当前出招表的持续时间
+                foreach (var key in _combatTableLastExecutionTime.Keys.ToList())
+                {
+                    if (key != tableKey) // 不包括当前出招表
+                    {
+                        _combatTableLastExecutionTime[key] += config.MaxDuration;
+                    }
+                }
+                
+                // 重置当前出招表的累计时间为0（因为刚执行完，从现在开始重新计时）
+                _combatTableLastExecutionTime[tableKey] = 0;
+                
+                // 标记当前出招表为已执行
+                _combatTableExecuted.Add(tableKey);
+            }
+            else
+            {
+                // 静态优先级出招表不需要维护累计时间，确保不创建记录
+                _combatTableLastExecutionTime.Remove(tableKey);
+            }
+            
+            // 3. 减少所有角色的所有技能CD（基于出招表持续时间）
+            // 所有技能CD都会减少当前出招表的持续时间，包括刚刚设置的新CD
+            ReduceAllSkillCooldowns(config.MaxDuration);
+            
+            // 4. 执行指令（会自动添加wait补齐不足的时间）
+            actualDuration = ExecuteCommands(config.Commands, config.MaxDuration);
         }
+        
+        return actualDuration;
     }
     
     /// <summary>
@@ -506,8 +593,9 @@ public class UniversalAutoFightTask
     /// 执行指令列表
     /// </summary>
     /// <param name="commands">指令列表</param>
-    /// <param name="maxDuration">最大持续时间（秒）</param>
-    private void ExecuteCommands(List<string> commands, double maxDuration)
+    /// <param name="maxDuration">最大持续时间（秒），如果为0则使用实际执行时间</param>
+    /// <returns>用户指令的实际执行时间（秒，不包括自动添加的wait时间）</returns>
+    private double ExecuteCommands(List<string> commands, double maxDuration)
     {
         // 获取当前出战角色用于执行指令
         Avatar? currentAvatar = null;
@@ -538,12 +626,41 @@ public class UniversalAutoFightTask
         if (currentAvatar == null)
         {
             Logger.LogWarning("无法获取有效的执行角色，跳过指令执行");
-            return;
+            return 0;
         }
         
-        // 创建执行器并执行指令
-        var executor = new UniversalCombatCommandExecutor(currentAvatar, maxDuration, CancellationToken.None);
-        executor.ExecuteCommands(commands);
+        // 如果maxDuration为0，只执行原始指令，返回实际执行时间
+        if (maxDuration <= 0)
+        {
+            var executor = new UniversalCombatCommandExecutor(currentAvatar, 0, CancellationToken.None);
+            var actualDuration = executor.ExecuteCommandsAndGetDuration(commands);
+            return actualDuration;
+        }
+        else
+        {
+            // 执行原始指令并获取实际执行时间（不包括自动添加的wait）
+            var executor = new UniversalCombatCommandExecutor(currentAvatar, maxDuration, CancellationToken.None);
+            var actualDuration = executor.ExecuteCommandsAndGetDuration(commands);
+            
+            // 如果实际执行时间超过maxDuration，说明指令被截断了，不需要添加wait
+            // 如果实际执行时间小于maxDuration，需要添加wait指令补齐
+            if (actualDuration < maxDuration)
+            {
+                var waitTime = maxDuration - actualDuration;
+                if (waitTime > 0.01) // 避免微小的等待时间
+                {
+                    Logger.LogDebug($"指令执行时间({actualDuration:F2}s)不足最大持续时间({maxDuration:F2}s)，添加wait({waitTime:F2})补齐");
+                    // 执行wait指令
+                    var waitCommands = new List<string> { $"wait({waitTime:F2})" };
+                    var waitExecutor = new UniversalCombatCommandExecutor(currentAvatar, waitTime, CancellationToken.None);
+                    waitExecutor.ExecuteCommands(waitCommands);
+                }
+            }
+            // 如果 actualDuration >= maxDuration，说明已经执行了完整时间或被截断，不需要添加wait
+            
+            // 返回用户指令的实际执行时间（不包括自动添加的wait）
+            return actualDuration;
+        }
     }
     
     /// <summary>
@@ -592,8 +709,8 @@ public class UniversalAutoFightTask
     {
         var calculationSteps = new List<string>();
         
-        // 规则3：当出招表内涉及的技能正在冷却中时，该出招表的真实优先级固定维持11
-        // 修改：只有当技能的真实CD大于接受的CD时间时，才会触发优先级11
+        // 规则：当出招表内涉及的技能正在冷却中，且剩余CD时间大于接受的CD时间时，
+        // 该出招表的真实优先级固定维持11（不可被减免）
         bool shouldFixPriorityTo11 = false;
         foreach (var skillCd in config.SkillCooldowns)
         {
@@ -616,9 +733,12 @@ public class UniversalAutoFightTask
             return (11, $"优先级11 ({string.Join(", ", calculationSteps)})"); // 固定优先级11，不可被减免
         }
         
-        // 获取出招表特定的累计执行时间（角色名+最大持续时间作为唯一标识）
-        var tableKey = $"{avatarName}_{config.MaxDuration}";
+        // 获取出招表特定的累计执行时间（角色名+出招表名称作为唯一标识）
+        var tableKey = $"{avatarName}_{config.CombatTableName}";
         double elapsedTime = _combatTableLastExecutionTime.TryGetValue(tableKey, out var lastTime) ? lastTime : 0;
+        
+        // 检查出招表是否已经执行过
+        bool isExecuted = _combatTableExecuted.Contains(tableKey);
         
         // 对于动态优先级出招表，检查是否需要清理内存
         if (config.PriorityConfig.Type == UniversalAutoFightParser.PriorityType.Dynamic)
@@ -627,12 +747,14 @@ public class UniversalAutoFightTask
             if (elapsedTime > config.PriorityConfig.EndTime)
             {
                 _combatTableLastExecutionTime.Remove(tableKey);
+                _combatTableExecuted.Remove(tableKey); // 同时清理执行标志
                 elapsedTime = config.PriorityConfig.EndTime; // 使用EndTime作为elapsedTime进行优先级计算
+                isExecuted = true; // 仍然认为已执行过，用于正确计算优先级
             }
         }
         
-        // 获取基础优先级（使用出招表特定的累计时间来计算动态优先级）
-        int basePriority = config.PriorityConfig.GetCurrentPriority(elapsedTime, elapsedTime > 0);
+        // 获取基础优先级（使用出招表特定的累计时间和执行状态来计算动态优先级）
+        int basePriority = config.PriorityConfig.GetCurrentPriority(elapsedTime, isExecuted);
         calculationSteps.Add($"出招表优先级{basePriority}");
         
         // 规则2：当某个角色为前台角色时，他的所有出招表真实优先级减一

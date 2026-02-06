@@ -1,3 +1,3 @@
-1 e:15
+0 e:14
 1
-mousedown(left),wait(0.02),e
+attack,wait(0.02),e

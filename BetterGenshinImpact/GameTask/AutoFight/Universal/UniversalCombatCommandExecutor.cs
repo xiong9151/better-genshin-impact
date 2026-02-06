@@ -53,6 +53,35 @@ public class UniversalCombatCommandExecutor
     }
 
     /// <summary>
+    /// 执行出招表中的所有指令并返回实际执行时间
+    /// </summary>
+    /// <param name="commands">指令列表</param>
+    /// <returns>实际执行时间（秒）</returns>
+    public double ExecuteCommandsAndGetDuration(List<string> commands)
+    {
+        var startTime = DateTime.Now;
+        _startTime = startTime;
+        _maxEndTime = startTime.AddSeconds(_maxDuration);
+
+        foreach (var commandLine in commands)
+        {
+            if (_cancellationToken.IsCancellationRequested)
+                return (DateTime.Now - startTime).TotalSeconds;
+
+            // 检查是否超过最大持续时间
+            if (DateTime.Now >= _maxEndTime)
+            {
+                Logger.LogInformation("出招表执行超时，停止执行剩余指令");
+                break;
+            }
+
+            ExecuteCommandLine(commandLine);
+        }
+        
+        return (DateTime.Now - startTime).TotalSeconds;
+    }
+
+    /// <summary>
     /// 执行单行指令（支持逗号分隔的多个指令）
     /// </summary>
     /// <param name="commandLine">指令行</param>
