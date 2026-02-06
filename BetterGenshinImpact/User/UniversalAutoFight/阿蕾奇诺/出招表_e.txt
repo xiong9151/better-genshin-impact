@@ -1,0 +1,3 @@
+1 e:15
+1
+mousedown(left),wait(0.02),e
