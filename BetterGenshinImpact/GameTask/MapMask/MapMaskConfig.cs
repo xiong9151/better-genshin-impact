@@ -14,7 +14,19 @@ public partial class MapMaskConfig : ObservableObject
     /// 是否启用
     /// </summary>
     [ObservableProperty]
-    private bool _enabled = true;
+    private bool _enabled = false;
+    
+    /// <summary>
+    /// 小地图遮罩是否启用
+    /// </summary>
+    [ObservableProperty]
+    private bool _miniMapMaskEnabled = false;
+    
+    /// <summary>
+    /// 自动记录路径功能是否启用
+    /// </summary>
+    [ObservableProperty]
+    private bool _pathAutoRecordEnabled = false;
 
     private MapPointApiProvider _mapPointApiProvider = MapPointApiProvider.MihoyoMap;
 
