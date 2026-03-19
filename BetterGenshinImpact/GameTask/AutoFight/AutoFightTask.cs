@@ -396,7 +396,7 @@ public class AutoFightTask : ISoloTask
                             var cd = avatar.GetSkillCdSeconds();
                             if (cd > 0)
                             {
-                                // 如果上一次该角色已经被跳过，则不进行log输出，以免刷屏
+                                // 如果上一次该角色已经被跳过，则不进行log提示，以免刷屏
                                 if (skipFightName != command.Name)
                                 {
                                     var manualSkillCd = avatar.ManualSkillCd;
@@ -505,12 +505,11 @@ public class AutoFightTask : ISoloTask
         if (_taskParam.BattleThresholdForLoot>=2 && countFight < _taskParam.BattleThresholdForLoot)
         {
             Logger.LogInformation($"战斗人次（{countFight}）低于配置人次（{_taskParam.BattleThresholdForLoot}），跳过此次拾取！");
-            return;
         }
         
         if (_taskParam.KazuhaPickupEnabled)
         {
-            // 队伍中存在万叶的时候使用一次长E
+            // 队伍中存在万叶的时候使用一次长 E
             var picker = combatScenes.SelectAvatar("枫原万叶") ?? combatScenes.SelectAvatar("琴");
             
             string? oldPartyName = null;
@@ -627,9 +626,14 @@ public class AutoFightTask : ISoloTask
                 if (picker.Name == "枫原万叶")
                 {
                     var time = TimeSpan.FromSeconds(picker.GetSkillCdSeconds());
-                    if (!(lastFightName == picker.Name && time.TotalSeconds > 3))
+
+                    // 如果配置了二次拾取，或者不满足跳过条件（上次是万叶且冷却时间>3 秒），则执行拾取
+                    bool shouldSkip = lastFightName == picker.Name && time.TotalSeconds > 3;
+                    bool forcePickup = _taskParam.QinDoublePickUp;
+                    
+                    if (forcePickup || !shouldSkip)
                     {
-                        Logger.LogInformation("使用 枫原万叶-长E 拾取掉落物");
+                        Logger.LogInformation("使用 枫原万叶 - 长 E 拾取掉落物");
                         await Delay(200, ct);
                         if (picker.TrySwitch(10))
                         {
@@ -647,11 +651,11 @@ public class AutoFightTask : ISoloTask
                 }
                 else if (picker.Name == "琴")
                 {
-                    Logger.LogInformation("使用 琴-长E 拾取掉落物");
+                    Logger.LogInformation("使用 琴 - 长 E 拾取掉落物");
                     
                     var actionsToUse = PickUpCollectHandler.PickUpActions
-                        .Where(action => action.StartsWith("琴-长E" + " ", StringComparison.OrdinalIgnoreCase))
-                        .Select(action => action.Replace("琴-长E","琴", StringComparison.OrdinalIgnoreCase))
+                        .Where(action => action.StartsWith("琴 - 长 E" + " ", StringComparison.OrdinalIgnoreCase))
+                        .Select(action => action.Replace("琴 - 长 E","琴", StringComparison.OrdinalIgnoreCase))
                         .ToArray();
 
                     var find = _taskParam.QinDoublePickUp;
@@ -691,7 +695,7 @@ public class AutoFightTask : ISoloTask
                                                 Monitor.Exit(PickLock);
                                             }
                                         }
-                                        // 后面没代码了，不用写return？
+                                        // 后面没代码了，不用写 return？
                                     });
                                 }
 
@@ -702,7 +706,7 @@ public class AutoFightTask : ISoloTask
 
                                 if (i == 0)
                                 {
-                                    Logger.LogInformation("自动拾取；尝试再次执行 琴-长E 拾取");
+                                    Logger.LogInformation("自动拾取；尝试再次执行 琴 - 长 E 拾取");
                                     // picker.LastSkillTime = DateTime.Now;不正确
                                     picker.AfterUseSkill();
                                 }
@@ -750,7 +754,7 @@ public class AutoFightTask : ISoloTask
     }
     
     /// <summary>
-    /// 启动UniversalAutoFight模式
+    /// 启动 UniversalAutoFight 模式
     /// </summary>
     private async Task StartUniversalAutoFight(CombatScenes combatScenes, CancellationToken ct)
     {
@@ -758,7 +762,7 @@ public class AutoFightTask : ISoloTask
         
         var universalAutoFightTask = new UniversalAutoFightTask(combatScenes);
         
-        // 新的取消token
+        // 新的取消 token
         var cts2 = new CancellationTokenSource();
         ct.Register(cts2.Cancel);
 
@@ -771,7 +775,24 @@ public class AutoFightTask : ISoloTask
 
         var fightEndFlag = false;
         var timeOutFlag = false;
+        string lastFightName = "";
+        
+        //统计切换人打架次数
+        var countFight = 0;
+        
+        AutoFightSeek.RotationCount= 0; // 重置旋转次数
+        
+        // UniversalAutoFight 模式专用的战斗结束检测计数器
+        var universalAutoFightCombatCount = 0; // 累计出招表执行次数
+        var shouldCheckNextCombat = false; // 标记是否需要在下一个出招表后检查
+        const int UNIVERSAL_AUTO_FIGHT_CHECK_THRESHOLD = 4; // 每 4 个出招表检查一次
+        const double UNIVERSAL_AUTO_FIGHT_INITIAL_DELAY = 4.0; // 战斗开始后 4 秒内不检查也不累计
+        const double UNIVERSAL_AUTO_FIGHT_LONG_DURATION = 8.0; // 单个出招表超过 8 秒触发检查
 
+        // UniversalAutoFight 模式的检查延时配置
+        var universalDelayTime = _finishDetectConfig.DelayTime;
+        var universalDetectDelayTime = _finishDetectConfig.DetectDelayTime;
+        
         // 战斗操作
         var fightTask = Task.Run(async () =>
         {
@@ -781,14 +802,111 @@ public class AutoFightTask : ISoloTask
                 
                 while (!cts2.Token.IsCancellationRequested)
                 {
-                    // 执行UniversalAutoFight核心战斗逻辑
+                    // 检查超时
+                    if (timeoutStopwatch.Elapsed > fightTimeout || AutoFightSeek.RotationCount >= 6)
+                    {
+                        Logger.LogInformation(AutoFightSeek.RotationCount >= 6 ? "旋转次数达到上限，战斗结束" : "战斗超时结束");
+                        fightEndFlag = true;
+                        timeOutFlag = true;
+                        break;
+                    }
+                    
+                    // 如果需要检查下一个出招表，先标记
+                    if (shouldCheckNextCombat)
+                    {
+                        Logger.LogDebug("已标记需要检查，等待当前出招表执行完成");
+                    }
+                    
+                    // 记录执行前的时间
+                    var beforeExecuteTime = DateTime.Now;
+                    
+                    // 执行 UniversalAutoFight 核心战斗逻辑
                     universalAutoFightTask.ProcessAutoFight();
                     
-                    // 短暂延迟，避免CPU占用过高
+                    // 统计战斗人次（根据 UniversalAutoFightTask 的实际实现调整）
+                    countFight++;
+                    
+                    // 计算出招表执行时间
+                    var executeDuration = (DateTime.Now - beforeExecuteTime).TotalSeconds;
+                    
+                    // 如果标记了需要检查，在当前出招表结束后立即执行检查
+                    if (shouldCheckNextCombat)
+                    {
+                        Logger.LogDebug($"当前出招表执行完成，耗时{executeDuration:F2}秒，开始执行检查流程");
+                        
+                        // 先等待 0.5 秒后再进行检查
+                        await Task.Delay(500, cts2.Token);
+                        
+                        checkFightFinishStopwatch.Restart();
+                        
+                        if (_finishDetectConfig.DelayTimes.TryGetValue("UniversalAutoFight", out var time))
+                        {
+                            universalDelayTime = time;
+                        }
+                        else
+                        {
+                            // 使用默认延时
+                        }
+                        
+                        fightEndFlag = await CheckFightFinish(universalDelayTime, universalDetectDelayTime);
+                        
+                        // 检查后清空累计计数和标记
+                        if (!fightEndFlag)
+                        {
+                            universalAutoFightCombatCount = 0;
+                            shouldCheckNextCombat = false;
+                            Logger.LogDebug($"战斗未结束，重置出招表计数器和检查标记");
+                        }
+                        
+                        if (fightEndFlag)
+                        {
+                            break;
+                        }
+                        
+                        // 跳过下面的条件判断，继续下一轮循环
+                        continue;
+                    }
+                    
+                    // 累计出招表执行次数（前 4 秒内不累计）
+                    if (timeoutStopwatch.Elapsed.TotalSeconds >= UNIVERSAL_AUTO_FIGHT_INITIAL_DELAY)
+                    {
+                        universalAutoFightCombatCount++;
+                        Logger.LogDebug($"战斗开始{timeoutStopwatch.Elapsed.TotalSeconds:F2}秒，累计出招表次数：{universalAutoFightCombatCount}");
+                    }
+                    else
+                    {
+                        Logger.LogDebug($"战斗开始仅{timeoutStopwatch.Elapsed.TotalSeconds:F2}秒，不累计出招表次数");
+                    }
+                    
+                    // 战斗结束检测逻辑（智能检测策略）- 仅设置标记，不立即检查
+                    if (_taskParam is { FightFinishDetectEnabled: true })
+                    {
+                        // 规则 1：战斗开始后 4 秒内不检查
+                        if (timeoutStopwatch.Elapsed.TotalSeconds < UNIVERSAL_AUTO_FIGHT_INITIAL_DELAY)
+                        {
+                            Logger.LogDebug($"战斗开始仅{timeoutStopwatch.Elapsed.TotalSeconds:F2}秒，暂不检查战斗结束");
+                        }
+                        else
+                        {
+                            // 规则 2：单个出招表运行时间超过 8 秒，标记下一个出招表后检查
+                            if (executeDuration >= UNIVERSAL_AUTO_FIGHT_LONG_DURATION)
+                            {
+                                Logger.LogDebug($"出招表执行时间{executeDuration:F2}秒 >= {UNIVERSAL_AUTO_FIGHT_LONG_DURATION}秒，标记下一个出招表后检查");
+                                shouldCheckNextCombat = true;
+                            }
+                            
+                            // 规则 3：累计 4 个出招表后，标记下一个出招表后检查
+                            if (universalAutoFightCombatCount >= UNIVERSAL_AUTO_FIGHT_CHECK_THRESHOLD)
+                            {
+                                Logger.LogDebug($"已执行{universalAutoFightCombatCount}个出招表，标记下一个出招表后检查");
+                                shouldCheckNextCombat = true;
+                            }
+                        }
+                    }
+                    
+                    // 短暂延迟，避免 CPU 占用过高
                     var delayTask = Task.Delay(100, cts2.Token);
                     await delayTask;
-                    
-                    
                 }
             }
             catch (OperationCanceledException)
@@ -802,23 +920,267 @@ public class AutoFightTask : ISoloTask
             }
             finally
             {
+                Simulation.ReleaseAllKey();
                 FightStatusFlag = false;
             }
         }, cts2.Token);
 
         // 等待战斗结束或超时
         await fightTask;
+        
+        // 战斗结束后处理拾取逻辑
+        if (_taskParam.BattleThresholdForLoot>=2 && countFight < _taskParam.BattleThresholdForLoot)
+        {
+            Logger.LogInformation($"战斗人次（{countFight}）低于配置人次（{_taskParam.BattleThresholdForLoot}），跳过此次拾取！");
+            // 不能直接 return，否则无法执行后续的通用拾取逻辑
+            // return;
+        }
+        
+        if (_taskParam.KazuhaPickupEnabled)
+        {
+            // 队伍中存在万叶的时候使用一次长 E
+            var picker = combatScenes.SelectAvatar("枫原万叶") ?? combatScenes.SelectAvatar("琴");
+            
+            string? oldPartyName = null;
+            if (RunnerContext.Instance.PartyName is not null)
+            {
+                oldPartyName = RunnerContext.Instance.PartyName;
+            }
+            else if(picker is null && !string.IsNullOrEmpty(_taskParam.KazuhaPartyName))
+            {
+                Logger.LogWarning("换队拾取：当前队伍名称为空，尝试读取！");
+                await Delay(1000, cts2.Token);
+                await _returnMainUiTask.Start(cts2.Token);
 
-        // 处理战斗结束后的逻辑
-        if (fightEndFlag || timeOutFlag)
-        {
-        if (_taskParam.PickDropsAfterFightEnabled)
-        {
-            // 执行自动拾取掉落物的功能
-            await new ScanPickTask().Start(cts2.Token);
+                for (int attempt = 0; attempt < 6; attempt++)
+                {
+                    Simulation.SendInput.SimulateAction(GIActions.OpenPartySetupScreen);
+                    var enterGameAppear = await NewRetry.WaitForElementAppear(
+                        ElementAssets.Instance.PartyBtnChooseView,
+                        () => { },
+                        cts2.Token,
+                        15,
+                        500
+                    );
+                    if(attempt == 5 && !enterGameAppear)
+                    {
+                        Logger.LogWarning("换队拾取：读取队伍名称失败，跳过换队拾取步骤");
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_taskParam.KazuhaPartyName)){
+                await Delay(1000, cts2.Token);
+                    
+                //等待寻找 2 秒队伍按钮出现
+                var timeWaitStart = 0;
+                while(timeWaitStart < 6000)
+                {
+                    using var ra = CaptureToRectArea();
+                    var partyViewBtn = ra.Find(ElementAssets.Instance.PartyBtnChooseView);
+                    if (partyViewBtn.IsExist())
+                    {
+                        // OCR 当前队伍名称（无法单字，中间禁止空格）
+                    // 读取 OCR 原始识别文本
+                    var rawPartyName = ra.Find(new RecognitionObject
+                    {
+                        RecognitionType = RecognitionTypes.Ocr,
+                        RegionOfInterest = new Rect(partyViewBtn.Right, partyViewBtn.Top, (int)(350 * _assetScale),
+                            partyViewBtn.Height)
+                    }).Text;
+                    
+                    // 核心处理逻辑：1.空值兜底 2.去首尾空白 3.移除末尾的"口"字（仅最后一个是口才删）
+                    if (string.IsNullOrWhiteSpace(rawPartyName))
+                    {
+                        oldPartyName = string.Empty;
+                    }
+                    else
+                    {
+                        //有概率把编辑图标识别为字符，并且含有空格或换行符，需要过滤
+                        var tempName = rawPartyName
+                            .Replace("\"", "")        // 移除所有双引号（核心新增，解决日志里的""问题）
+                            .Replace("\r\n", "")      // 清理 Windows 换行符
+                            .Replace("\r", "");   // 先清理所有双引号，避免引号干扰后续处理
+                            
+                            // 核心逻辑：找到第一个换行符 (\n) 的位置，截断并删除换行 + 后面所有字符
+                            int firstNewLineIndex = tempName.IndexOf('\n');
+                            if (firstNewLineIndex != -1) // 存在换行符，截取到换行符前
+                            {
+                                tempName = tempName.Substring(0, firstNewLineIndex);
+                            }
+                        
+                            // 最后统一去首尾所有空白（空格、制表符、回车符\r 等），得到纯净队伍名
+                            oldPartyName = tempName.Trim();
+                    }
+                    
+                    // 后续原有逻辑不变
+                    Logger.LogInformation("换队拾取：当前队伍名称读取为：{oldPartyName}", oldPartyName);
+                    // 加在 rawPartyName 赋值后，打印原始文本的"原始形态"（转义符会显示）
+                    Logger.LogDebug("OCR 原始识别文本（含转义）：{rawPartyName}", rawPartyName);
+                    RunnerContext.Instance.PartyName = oldPartyName;
+                        // await _returnMainUiTask.Start(ct);
+                        break;
+                    }
+                    await Delay(200, cts2.Token);
+                    timeWaitStart += 200;
+                }
+            }
+
+            var switchPartyFlag = false;
+            if (picker == null && !timeOutFlag &&!string.IsNullOrEmpty(_taskParam.KazuhaPartyName) && oldPartyName != _taskParam.KazuhaPartyName)
+            {
+                try
+                {
+                    Logger.LogInformation($"切换为拾取队伍：{_taskParam.KazuhaPartyName}");
+                    var success = await new SwitchPartyTask().Start(_taskParam.KazuhaPartyName, cts2.Token);
+                    if (success)
+                    {
+                        Logger.LogInformation($"成功切换队伍为{_taskParam.KazuhaPartyName}");
+                        switchPartyFlag = true;
+                        RunnerContext.Instance.PartyName = _taskParam.KazuhaPartyName;
+                        RunnerContext.Instance.ClearCombatScenes();
+                        var cs = await RunnerContext.Instance.GetCombatScenes(cts2.Token);
+                        picker = cs.SelectAvatar("枫原万叶") ?? cs.SelectAvatar("琴");
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.LogInformation("切换队伍异常，跳过此步骤！");
+                }
+
+            }
+            
+            if (picker != null)
+            {
+                if (picker.Name == "枫原万叶")
+                {
+                    var time = TimeSpan.FromSeconds(picker.GetSkillCdSeconds());
+
+                    // 如果配置了二次拾取，或者不满足跳过条件（上次是万叶且冷却时间>3 秒），则执行拾取
+                    bool shouldSkip = lastFightName == picker.Name && time.TotalSeconds > 3;
+                    bool forcePickup = _taskParam.QinDoublePickUp;
+                    
+                    if (forcePickup || !shouldSkip)
+                    {
+                        Logger.LogInformation("使用 枫原万叶 - 长 E 拾取掉落物");
+                        await Delay(200, cts2.Token);
+                        if (picker.TrySwitch(10))
+                        {
+                            await picker.WaitSkillCd(cts2.Token);
+                            picker.UseSkill(true);
+                            await Delay(50, cts2.Token);
+                            Simulation.SendInput.SimulateAction(GIActions.NormalAttack);
+                            await Delay(1500, cts2.Token);
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogInformation("距最近一次万叶出招，时间过短，跳过此次万叶拾取！");
+                    }
+                }
+                else if (picker.Name == "琴")
+                {
+                    Logger.LogInformation("使用 琴 - 长 E 拾取掉落物");
+                    
+                    var actionsToUse = PickUpCollectHandler.PickUpActions
+                        .Where(action => action.StartsWith("琴 - 长 E" + " ", StringComparison.OrdinalIgnoreCase))
+                        .Select(action => action.Replace("琴 - 长 E","琴", StringComparison.OrdinalIgnoreCase))
+                        .ToArray();
+
+                    var find = _taskParam.QinDoublePickUp;
+                    await Delay(150, cts2.Token);
+                    if (picker.TrySwitch(10))
+                    {
+                        foreach (var miningActionStr in actionsToUse)
+                        {
+                            var pickUpAction = CombatScriptParser.ParseContext(miningActionStr);
+
+                            for (int i = 0; i < 2; i++)
+                            {
+                                await picker.WaitSkillCd(cts2.Token);
+                                foreach (var command in pickUpAction.CombatCommands)
+                                {
+                                    command.Execute(combatScenes);
+                                    //异步执行，防止卡顿
+                                    Task.Run(() =>
+                                    {
+                                        if (Monitor.TryEnter(PickLock))
+                                        {
+                                            try
+                                            {
+                                                if (find)
+                                                {
+                                                    using (var imagePick = CaptureToRectArea())
+                                                    {
+                                                        if (imagePick.Find(AutoPickAssets.Instance.PickRo).IsExist())
+                                                        {
+                                                            find = false;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            finally
+                                            {
+                                                Monitor.Exit(PickLock);
+                                            }
+                                        }
+                                        // 后面没代码了，不用写 return？
+                                    });
+                                }
+
+                                if (!find)
+                                {
+                                    break;
+                                }
+
+                                if (i == 0)
+                                {
+                                    Logger.LogInformation("自动拾取；尝试再次执行 琴 - 长 E 拾取");
+                                    // picker.LastSkillTime = DateTime.Now;不正确
+                                    picker.AfterUseSkill();
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+                            
+                            Simulation.ReleaseAllKey();
+                        }
+                    }
+                }
+            }
+            //切换过队伍的，需要再切回来
+            if (switchPartyFlag && !string.IsNullOrEmpty(oldPartyName))
+            {
+                try
+                {
+                    Logger.LogInformation($"切换为原队伍：{oldPartyName}");
+                    var success = await new SwitchPartyTask().Start(oldPartyName, cts2.Token);
+                    if (success)
+                    {
+                        Logger.LogInformation($"切换为原队伍{oldPartyName}");
+                        switchPartyFlag = true;
+                        RunnerContext.Instance.PartyName = oldPartyName;
+                        RunnerContext.Instance.ClearCombatScenes();
+                        await RunnerContext.Instance.GetCombatScenes(cts2.Token);
+    
+                    }
+                }
+                catch (Exception e)
+                {
+                    Logger.LogInformation("恢复原队伍失败，跳过此步骤！");
+                }
+                    
             }
         }
 
+        if (_taskParam is { PickDropsAfterFightEnabled: true } )
+        {
+            // 执行自动拾取掉落物的功能
+            await new ScanPickTask().Start(cts2.Token);
+        }
+        
         cts2.Cancel();
     }
     
