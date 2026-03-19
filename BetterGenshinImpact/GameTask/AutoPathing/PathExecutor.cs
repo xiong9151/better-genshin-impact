@@ -188,7 +188,19 @@ public class PathExecutor
                         {
                             if (CurWaypoints.Item1 > 0)
                             {
-                                await Delay(1000, ct);
+                                var prevWaypoints = waypointsList[CurWaypoints.Item1 - 1];
+                                var prevWaypoint = prevWaypoints[prevWaypoints.Count - 1];
+                                if (prevWaypoint.Type == WaypointType.Teleport.Code
+                                    || prevWaypoint.Action == ActionEnum.Fight.Code
+                                    || prevWaypoint.Action == ActionEnum.NahidaCollect.Code
+                                    || prevWaypoint.Action == ActionEnum.PickAround.Code)
+                                {
+                                    // No delay
+                                }
+                                else
+                                {
+                                    await Delay(1000, ct);
+                                }
                             }
                             await HandleTeleportWaypoint(waypoint);
                         }
@@ -653,7 +665,7 @@ public class PathExecutor
         bool changeBigMap = false;
         string adventurersGuildCountry =
             TaskContext.Instance().Config.OtherConfig.AutoFetchDispatchAdventurersGuildCountry;
-        if (!RunnerContext.Instance.isAutoFetchDispatch && adventurersGuildCountry != "无")
+        if (!RunnerContext.Instance.isAutoFetchDispatch && adventurersGuildCountry != "无" && !string.IsNullOrEmpty(adventurersGuildCountry))
         {
             var ra1 = CaptureToRectArea();
             var textRect = new Rect(60, 20, 160, 260);

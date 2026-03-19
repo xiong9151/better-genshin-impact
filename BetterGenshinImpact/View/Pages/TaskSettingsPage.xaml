@@ -1000,12 +1000,12 @@
                                 <ui:TextBlock Grid.Row="0"
                                               Grid.Column="0"
                                               FontTypography="Body"
-                                              Text="自动拾取掉落物"
+                                              Text="扫描掉落物光柱"
                                               TextWrapping="Wrap" />
                                 <ui:TextBlock Grid.Row="1"
                                               Grid.Column="0"
                                               Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                              Text="战斗结束后尽可能拾取周围掉落物（与万叶配合更佳）"
+                                              Text="战斗结束后旋转视角寻找掉落物光柱并靠近（仅在无万叶时备用）"
                                               TextWrapping="Wrap" />
                                 <ui:ToggleSwitch Grid.Row="0"
                                                  Grid.RowSpan="2"
@@ -1027,12 +1027,12 @@
                                 <ui:TextBlock Grid.Row="0"
                                               Grid.Column="0"
                                               FontTypography="Body"
-                                              Text="自动拾取掉落物时长"
+                                              Text="扫描掉落物光柱时长"
                                               TextWrapping="Wrap" />
                                 <ui:TextBlock Grid.Row="1"
                                               Grid.Column="0"
                                               Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
-                                              Text="单位为秒。0表示不自动拾取掉落物。"
+                                              Text="单位为秒。0表示不扫描掉落物光柱。"
                                               TextWrapping="Wrap" />
                                 <ui:TextBox Grid.Row="0"
                                             Grid.RowSpan="2"
@@ -1067,7 +1067,7 @@
                                   FontSize="10"
                                   FontTypography="Body"
                                   VerticalAlignment="Bottom"
-                                  Text="(琴二次拾取：首次拾取空,再次拾取)"
+                                  Text="(二次拾取：琴首次拾取空,再次拾取。万叶即使刚使用过技能，也会强制再次拾取。)"
                                   TextWrapping="Wrap" />
                     
                     <ui:TextBlock Grid.Row="1"
@@ -1096,7 +1096,7 @@
                                   Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
                                   Margin="0,0,38,26"
                                   FontTypography="Body"
-                                  Text="琴二次拾取"
+                                  Text="二次拾取"
                                   TextWrapping="Wrap" />
                 </Grid>
                 <Separator Margin="-18,0"
@@ -2374,6 +2374,513 @@
                                 Margin="0,0,36,0"
                                 Text="{Binding Config.AutoFishingConfig.TorchDllFullPath, Mode=TwoWay}"
                                 TextWrapping="Wrap" Cursor="IBeam" />
+                </Grid>
+            </StackPanel>
+        </ui:CardExpander>
+
+        <!-- 自动地脉花 -->
+        <ui:CardExpander Margin="0,0,0,12" ContentPadding="0">
+            <ui:CardExpander.Icon>
+                <ui:FontIcon Glyph="&#xf7ff;" Style="{StaticResource FaFontIconStyle}" />
+            </ui:CardExpander.Icon>
+            <ui:CardExpander.Header>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="自动地脉花"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        自动定位并刷取地脉花 -
+                        <Hyperlink Command="{Binding GoToAutoLeyLineOutcropUrlCommand}"
+                                   Foreground="{ui:ThemeResource TextFillColorSecondaryBrush}">
+                            点击查看使用教程
+                        </Hyperlink>
+                    </ui:TextBlock>
+                    <controls:TwoStateButton Grid.Row="0"
+                                             Grid.RowSpan="2"
+                                             Grid.Column="1"
+                                             Margin="0,0,24,0"
+                                             DisableCommand="{Binding StopSoloTaskCommand}"
+                                             DisableContent="停止"
+                                             EnableCommand="{Binding SwitchAutoLeyLineOutcropCommand}"
+                                             EnableContent="{Binding SwitchAutoLeyLineOutcropButtonText}"
+                                             IsChecked="{Binding SwitchAutoLeyLineOutcropEnabled}" />
+                </Grid>
+            </ui:CardExpander.Header>
+            <StackPanel>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="地脉花类型"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        选择刷取的地脉花，启示之花（经验书）或藏金之花（摩拉）。
+                    </ui:TextBlock>
+                    <ComboBox Grid.Row="0"
+                              Grid.RowSpan="2"
+                              Grid.Column="1"
+                              Width="150"
+                              Margin="0,0,36,0"
+                              ItemsSource="{Binding Source={x:Static pages:TaskSettingsPageViewModel.LeyLineOutcropTypeList}}"
+                              SelectedItem="{Binding Config.AutoLeyLineOutcropConfig.LeyLineOutcropType, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="国家"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        按国家选择刷取对应的地脉花。
+                    </ui:TextBlock>
+                    <ComboBox Grid.Row="0"
+                              Grid.RowSpan="2"
+                              Grid.Column="1"
+                              Width="120"
+                              Margin="0,0,36,0"
+                              ItemsSource="{Binding Source={x:Static pages:TaskSettingsPageViewModel.LeyLineOutcropCountryList}}"
+                              SelectedItem="{Binding Config.AutoLeyLineOutcropConfig.Country, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="选择战斗策略"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  Text="用于战斗"
+                                  TextWrapping="Wrap" />
+                    <ui:Button Grid.Row="0"
+                               Grid.RowSpan="2"
+                               Grid.Column="1"
+                               Margin="0,0,12,0"
+                               Content="脚本仓库"
+                               Command="{Binding OpenLocalScriptRepoCommand}"
+                               Icon="{ui:SymbolIcon Archive24}" />
+                    <ui:Button Grid.Row="0"
+                               Grid.RowSpan="2"
+                               Grid.Column="2"
+                               Margin="0,0,12,0"
+                               Command="{Binding OpenFightFolderCommand}"
+                               Content="打开目录" />
+                    <ComboBox Grid.Row="0"
+                              Grid.RowSpan="2"
+                              Grid.Column="3"
+                              Width="180"
+                              Margin="0,0,36,0"
+                              ItemsSource="{Binding AutoFightViewModel.CombatStrategyList}"
+                              SelectedItem="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.StrategyName, Mode=TwoWay}">
+                        <b:Interaction.Triggers>
+                            <b:EventTrigger EventName="DropDownOpened">
+                                <b:InvokeCommandAction Command="{Binding StrategyDropDownOpenedCommand}"
+                                                       CommandParameter="Combat" />
+                            </b:EventTrigger>
+                        </b:Interaction.Triggers>
+                    </ComboBox>
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="根据技能CD优化出招人员"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  Text="根据填入人或人和cd，来决定当此人元素战技cd未结束时，跳过此人出招，来优化战斗流程，可填入人名或人名数字（用逗号分隔），多种用分号分隔，例如:白术;钟离,12;，如果人名，则用内置cd检查（或填入数字也小于0），如果是人名和数字，则把数字当做出招cd(秒)。"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBox Grid.Row="0"
+                                Grid.RowSpan="2"
+                                Grid.Column="1"
+                                MinWidth="180"
+                                MaxWidth="800"
+                                Margin="0,0,36,0"
+                                Text="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.ActionSchedulerByCd, Mode=TwoWay}"
+                                TextWrapping="Wrap" />
+                </Grid>
+                <Separator Margin="-18,0" BorderThickness="0,1,0,0" />
+                <Grid Margin="16,16,16,13">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="聚集材料动作"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  Margin="90,0,5,0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  FontSize="10"
+                                  FontTypography="Body"
+                                  VerticalAlignment="Bottom"
+                                  Text="(二次拾取：琴首次拾取空,再次拾取。万叶即使刚使用过技能，也会强制再次拾取。)"
+                                  TextWrapping="Wrap" />
+
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  Text="战斗结束后，如存在(万叶/琴)，则执行长E聚集材料动作"
+                                  TextWrapping="Wrap" />
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,10,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.KazuhaPickupEnabled, Mode=TwoWay}" />
+
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="2"
+                                     Margin="0,0,38,0"
+                                     IsEnabled="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.KazuhaPickupEnabled, Mode=TwoWay}"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.QinDoublePickUp, Mode=TwoWay}" />
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.RowSpan="2"
+                                  Grid.Column="2"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  FontSize="8"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  Margin="0,0,38,26"
+                                  FontTypography="Body"
+                                  Text="二次拾取"
+                                  TextWrapping="Wrap" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="树脂耗尽模式"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        按当前树脂与库存自动计算可刷次数，结束后自动停止。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.IsResinExhaustionMode, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="刷取次数取小值"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        与手动次数取最小值，避免超过树脂可用次数。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.OpenModeCountMin, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="刷取次数"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        树脂耗尽模式关闭或统计失败时使用的固定次数。
+                    </ui:TextBlock>
+                    <ui:NumberBox Grid.Row="0"
+                                  Grid.RowSpan="2"
+                                  Grid.Column="1"
+                                  Margin="0,0,36,0"
+                                  Maximum="999"
+                                  Minimum="1"
+                                  ValidationMode="InvalidInputOverwritten"
+                                  Value="{Binding Config.AutoLeyLineOutcropConfig.Count, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="使用须臾树脂"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        原粹与浓缩耗尽后，允许使用须臾树脂继续刷取。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.UseTransientResin, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="使用脆弱树脂"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        原粹与浓缩耗尽后，允许使用脆弱树脂继续刷取。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.UseFragileResin, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="战斗队伍名称"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        进入战斗前切换到该队伍，留空则不切换。
+                        <LineBreak/>
+                        如果配置了好感队则必须填写。
+                    </ui:TextBlock>
+                    <ui:TextBox Grid.Row="0"
+                                Grid.RowSpan="2"
+                                Grid.Column="1"
+                                MinWidth="180"
+                                Margin="0,0,36,0"
+                                Text="{Binding Config.AutoLeyLineOutcropConfig.Team, Mode=TwoWay}"
+                                TextWrapping="Wrap"
+                                Cursor="IBeam" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="好感队名称"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        领取奖励前切换到该队伍，留空则不切换。
+                    </ui:TextBlock>
+                    <ui:TextBox Grid.Row="0"
+                                Grid.RowSpan="2"
+                                Grid.Column="1"
+                                MinWidth="180"
+                                Margin="0,0,36,0"
+                                Text="{Binding Config.AutoLeyLineOutcropConfig.FriendshipTeam, Mode=TwoWay}"
+                                TextWrapping="Wrap"
+                                Cursor="IBeam" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="战斗超时时间（秒）"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        到达指定时间后，自动停止战斗。
+                    </ui:TextBlock>
+                    <ui:NumberBox Grid.Row="0"
+                                  Grid.RowSpan="2"
+                                  Grid.Column="1"
+                                  Margin="0,0,36,0"
+                                  Maximum="9999"
+                                  Minimum="1"
+                                  ValidationMode="InvalidInputOverwritten"
+                                  Value="{Binding Config.AutoLeyLineOutcropConfig.FightConfig.Timeout, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="不使用冒险之证寻路"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        勾选后改用内置路线，不通过冒险之证定位地脉花。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.UseAdventurerHandbook, Mode=TwoWay}" />
+                </Grid>
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBlock Grid.Row="0"
+                                  Grid.Column="0"
+                                  FontTypography="Body"
+                                  Text="发送通知"
+                                  TextWrapping="Wrap" />
+                    <ui:TextBlock Grid.Row="1"
+                                  Grid.Column="0"
+                                  Foreground="{ui:ThemeResource TextFillColorTertiaryBrush}"
+                                  TextWrapping="Wrap">
+                        任务完成或失败时通过通知系统发送提醒。
+                    </ui:TextBlock>
+                    <ui:ToggleSwitch Grid.Row="0"
+                                     Grid.RowSpan="2"
+                                     Grid.Column="1"
+                                     Margin="0,0,36,0"
+                                     IsChecked="{Binding Config.AutoLeyLineOutcropConfig.IsNotification, Mode=TwoWay}" />
                 </Grid>
             </StackPanel>
         </ui:CardExpander>
